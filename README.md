@@ -1,0 +1,33 @@
+# Pixora Today
+
+One private glance at every Pixora app: Spend Log, Split Log and Contour.
+Live at https://spoolsync.github.io/pixora/
+
+## What it shows
+- **Needs attention:** bills due soon, return deadlines, what you owe friends, food or
+  purchases not logged yet today, today's workout.
+- **One card per app:** this month's spending and bills, your split balances, today's
+  calories, protein, workouts and weight trend.
+- Updates live while open, and works offline with the last copy.
+
+## How it stays private
+- The dashboard makes an encryption key pair. The public half sits in your own account
+  (`apps/dashboard/users/<uid>`); the private half is kept there only wrapped by your
+  dashboard passcode, and on each phone in a form web pages can't read out.
+- Each app encrypts a short summary to that public key on the phone and stores it in
+  `apps/dashboard/users/<uid>/inbox/<app>`. The server, the project owner and any AI see
+  only ciphertext. Other accounts are refused by the database rules.
+- Nothing is sent when you're not signed in or haven't set up the dashboard.
+- Forgot the passcode? Settings > Start over makes new keys; each app sends a fresh summary
+  the next time you open it. Nothing inside the apps is touched.
+
+## For app builders
+`pixora-summary.js` is the shared module. Each app includes a copy and calls
+`PixoraSummary.schedule("<app>", getArgs)` whenever its data changes. Keep the copies in
+sync across repos.
+
+## Cloud
+Pixora Firebase project `pixora-bca1f`, web app "Pixora Today". The generic
+`apps/{app}/users/{uid}` owner-only rule covers the dashboard; no extra rules needed.
+
+When you change files, bump `CACHE` in `sw.js` so installed phones pick up the new copy.
