@@ -31,3 +31,14 @@ Pixora Firebase project `pixora-bca1f`, web app "Pixora Today". The generic
 `apps/{app}/users/{uid}` owner-only rule covers the dashboard; no extra rules needed.
 
 When you change files, bump `CACHE` in `sw.js` so installed phones pick up the new copy.
+
+## Pixora Admin
+https://spoolsync.github.io/pixora/admin/ shows anonymous feature counts and error reports for
+every app: no account ids, amounts, names or anything a person typed. Only the verified admin
+email in `firestore.rules` (`isPixoraAdmin`) can read them. Each app counts through
+`pixora-usage.js` (shared copy in every app).
+
+## Database rules: one source of truth
+`firestore.rules` here is the complete, live rule set for the whole Pixora project. Edit this
+file, then paste the whole file into Firebase console > Firestore > Rules and Publish. Never
+paste only one app's section: that replaces every other app's rules.

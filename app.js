@@ -15,6 +15,7 @@ var fdb=null,cuser=null,PRIV=null,KID=null,inbox={},unsub=null,screen="home",sta
 
 /* ---------- small helpers ---------- */
 function $(id){return document.getElementById(id);}
+function T(f){try{if(window.PixoraUsage)PixoraUsage.track(f);}catch(e){}}
 function h(tag,attrs){
   var el=document.createElement(tag),k,v;
   if(attrs)for(k in attrs){v=attrs[k];if(v==null||v===false)continue;
@@ -115,13 +116,13 @@ function render(){
   var d=new Date();
   app.append(h("header",{class:"top"},
     h("div",null,h("p",{class:"eyebrow",text:d.toLocaleDateString("en-CA",{weekday:"long",month:"long",day:"numeric"})}),h("h1",{text:greet(d)})),
-    h("button",{type:"button",class:"btn quiet mini",text:"Settings",onclick:function(){screen="settings";render();}})),
+    h("button",{type:"button",class:"btn quiet mini",text:"Settings",onclick:function(){T("settings");screen="settings";render();}})),
     statusChip());
   var items=attention();
   if(items.length){
     var box=h("section",{class:"attn","aria-label":"Needs attention"},h("p",{class:"eyebrow",text:"Needs attention"}));
     items.forEach(function(it){
-      box.append(h("a",{class:"row",href:APPS[it.app].url},h("span",{class:"dot",style:"background:var(--"+APPS[it.app].cls+")"}),h("span",{class:"what",text:it.text}),h("span",{class:"when",text:it.when||""})));
+      box.append(h("a",{class:"row",href:APPS[it.app].url,onclick:function(){T("attention_tap_"+it.app);}},h("span",{class:"dot",style:"background:var(--"+APPS[it.app].cls+")"}),h("span",{class:"what",text:it.text}),h("span",{class:"when",text:it.when||""})));
     });
     app.append(box);
   }else if(Object.keys(inbox).length){
@@ -158,7 +159,7 @@ function cardShell(k,body){
   return h("article",{class:"card "+a.cls+(k==="spendlog"?" wide":"")},
     h("div",{class:"chead"},h("h2",{text:a.name}),got?h("span",{class:"age"+(stale?" stale":""),text:"Updated "+ago(got.at)}):null),
     body,
-    h("div",{class:"btnrow"},h("a",{class:"btn quiet mini",href:a.url,text:"Open "+a.name})));
+    h("div",{class:"btnrow"},h("a",{class:"btn quiet mini",href:a.url,text:"Open "+a.name,onclick:function(){T("open_"+k);}})));
 }
 function card(k){
   var got=inbox[k];
@@ -295,7 +296,7 @@ async function enter(){
   screen="home";
   var last=await kvGet("last:"+cuser.uid).catch(function(){return null;});
   if(last&&last.kid===KID)inbox=last.inbox||{};
-  render();listen();
+  render();listen();T("view_today");
   try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
 }
 async function lockNow(){
@@ -324,7 +325,7 @@ async function startOver(fromGate){
 document.addEventListener("visibilitychange",function(){
   if(document.hidden){hiddenAt=Date.now();return;}
   if(PRIV&&!keepOn&&hiddenAt&&Date.now()-hiddenAt>180000){lockNow();return;}
-  if(PRIV&&screen==="home")render();
+  if(PRIV&&screen==="home"){render();T("view_today");}
 });
 
 /* ---------- start ---------- */
@@ -335,6 +336,7 @@ document.addEventListener("visibilitychange",function(){
   fdb=firebase.firestore();
   if(window.PIXORA_EMULATOR){fdb.useEmulator("127.0.0.1",window.PIXORA_EMULATOR.db);firebase.auth().useEmulator("http://127.0.0.1:"+window.PIXORA_EMULATOR.auth,{disableWarnings:true});}
   fdb.enablePersistence({synchronizeTabs:true}).catch(function(){});
+  if(window.PixoraUsage)PixoraUsage.init("dashboard","pixoratoday-v2",function(){return fdb&&cuser?fdb:null;});
   try{keepOn=(await kvGet("keep"))!==false;}catch(e){}
   var first=true;
   firebase.auth().onAuthStateChanged(async function(u){

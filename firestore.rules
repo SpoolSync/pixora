@@ -1,0 +1,150 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isMe(uid) { return signedIn() && request.auth.uid == uid; }
+
+    // One shared account profile per person, used by every Pixora app.
+    match /users/{uid} {
+      allow read, write: if isMe(uid);
+    }
+
+    // Lookup by email so a member can find their trainer. Exact-address lookups only, no listing.
+    match /directory/{email} {
+      allow get: if signedIn();
+      // Only a person with a verified email can list themselves as a trainer, so nobody can pose as someone else.
+      allow create, update: if signedIn()
+        && request.auth.token.email.lower() == email
+        && request.resource.data.uid == request.auth.uid
+        && (request.resource.data.trainer != true || request.auth.token.email_verified == true);
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // Contour: a grant is a member giving one trainer read access. Only the member can create it.
+    // It carries the member's data key sealed to the trainer's public key (encrypted on the member's phone).
+    match /apps/contour/grants/{grantId} {
+      allow read: if signedIn()
+        && (resource.data.member == request.auth.uid || resource.data.trainer == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.member == request.auth.uid
+        && grantId == request.auth.uid + '_' + request.resource.data.trainer;
+      allow update: if signedIn()
+        && resource.data.member == request.auth.uid
+        && request.resource.data.member == resource.data.member
+        && request.resource.data.trainer == resource.data.trainer;
+      allow delete: if signedIn()
+        && (resource.data.member == request.auth.uid || resource.data.trainer == request.auth.uid);
+    }
+
+    // Contour data (encrypted on the phone): the owner reads and writes; a trainer holding a grant can read, never write.
+    match /apps/contour/users/{uid}/{document=**} {
+      allow read: if isMe(uid)
+        || (signedIn() && exists(/databases/$(database)/documents/apps/contour/grants/$(uid + '_' + request.auth.uid)));
+      allow write: if isMe(uid);
+    }
+
+    // Contour: foods that members add for everyone. Anyone signed in can read; you can only add as yourself and delete your own.
+    match /apps/contour/foods/{foodId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.by == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2 && request.resource.data.name.size() <= 80
+        && request.resource.data.kcal is number
+        && request.resource.data.kcal >= 0 && request.resource.data.kcal <= 5000;
+      allow delete: if signedIn() && resource.data.by == request.auth.uid;
+    }
+
+    // Contour: exercises written by trainers. Shown to everyone, or only to members who share their profile with that trainer.
+    function isVerifiedTrainer() {
+      return signedIn() && request.auth.token.email_verified == true
+        && get(/databases/$(database)/documents/directory/$(request.auth.token.email.lower())).data.trainer == true;
+    }
+    function validExercise(d) {
+      return d.by == request.auth.uid
+        && d.name is string && d.name.size() >= 2 && d.name.size() <= 80
+        && d.authorName is string && d.authorName.size() <= 30
+        && d.regions is list && d.regions.size() >= 1 && d.regions.size() <= 12
+        && (d.vis == 'all' || d.vis == 'clients')
+        && d.json is string && d.json.size() <= 20000;
+    }
+    match /apps/contour/exercises/{exId} {
+      allow read: if signedIn() && (resource.data.vis == 'all'
+        || resource.data.by == request.auth.uid
+        || exists(/databases/$(database)/documents/apps/contour/grants/$(request.auth.uid + '_' + resource.data.by)));
+      allow create: if isVerifiedTrainer() && validExercise(request.resource.data);
+      allow update: if isVerifiedTrainer() && resource.data.by == request.auth.uid && validExercise(request.resource.data);
+      allow delete: if signedIn() && resource.data.by == request.auth.uid;
+    }
+
+    // Split Log: a group is shared by its members. Joining needs the secret carried in the invite,
+    // and everything inside a group is encrypted on the phones with a key the server never sees.
+    function splitGroup(db, gid) { return /databases/$(db)/documents/apps/splitlog/groups/$(gid); }
+    function splitMember(db, gid) {
+      return signedIn() && exists(/databases/$(db)/documents/apps/splitlog/groups/$(gid)/members/$(request.auth.uid));
+    }
+    match /apps/splitlog/groups/{gid} {
+      allow get: if splitMember(database, gid);
+      allow create: if signedIn()
+        && request.resource.data.owner == request.auth.uid
+        && request.resource.data.jh is string && request.resource.data.jh.size() == 64;
+      allow update: if splitMember(database, gid)
+        && request.resource.data.owner == resource.data.owner
+        && request.resource.data.jh == resource.data.jh;
+      allow delete: if signedIn() && resource.data.owner == request.auth.uid;
+
+      match /members/{uid} {
+        allow get: if isMe(uid) || splitMember(database, gid);
+        allow list: if splitMember(database, gid);
+        allow create: if isMe(uid)
+          && request.resource.data.keys().hasOnly(['t', 'at'])
+          && request.resource.data.t is string
+          && hashing.sha256(request.resource.data.t).toHexString().lower() == get(splitGroup(database, gid)).data.jh;
+        allow delete: if isMe(uid)
+          || (signedIn() && get(splitGroup(database, gid)).data.owner == request.auth.uid);
+      }
+
+      match /items/{id} {
+        allow read, write: if splitMember(database, gid);
+      }
+    }
+
+
+    // Pixora usage: anonymous counts per app, feature and day, so the apps can be improved.
+    // Signed-in apps can only add 1 to 50 to one counter per write; there is no account id and no user content.
+    // Only the verified Pixora admin email can read them.
+    function isPixoraAdmin() {
+      return signedIn() && request.auth.token.email_verified == true
+        && request.auth.token.email.lower() in ['pixora3dstudios@gmail.com'];
+    }
+    // One counter document per app, day and feature: stats/<app>/f/<day>_<feature> holding {n, d, f}.
+    function counter(d) {
+      return d.keys().hasOnly(['n', 'd', 'f']) && d.n is int
+        && d.d is string && d.d.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && d.f is string && d.f.matches('^[a-z0-9_]{1,40}$');
+    }
+    match /stats/{app}/f/{id} {
+      allow read, delete: if isPixoraAdmin();
+      allow create: if signedIn() && app.matches('^[a-z]{2,20}$')
+        && counter(request.resource.data) && id == request.resource.data.d + '_' + request.resource.data.f
+        && request.resource.data.n >= 1 && request.resource.data.n <= 50;
+      allow update: if signedIn() && counter(request.resource.data)
+        && request.resource.data.d == resource.data.d && request.resource.data.f == resource.data.f
+        && request.resource.data.n - resource.data.n >= 1 && request.resource.data.n - resource.data.n <= 50;
+    }
+    match /stats/{app}/errors/{id} {
+      allow read, delete: if isPixoraAdmin();
+      allow create: if signedIn() && app.matches('^[a-z]{2,20}$')
+        && request.resource.data.keys().hasOnly(['m', 'v', 'p', 'd'])
+        && request.resource.data.m is string && request.resource.data.m.size() <= 160
+        && request.resource.data.v is string && request.resource.data.v.size() <= 20
+        && request.resource.data.p is string && request.resource.data.p.size() <= 30
+        && request.resource.data.d is string && request.resource.data.d.size() == 10;
+    }
+
+    // Every other Pixora app, including the Pixora Today dashboard: each person's data is private to them.
+    match /apps/{app}/users/{uid}/{document=**} {
+      allow read, write: if isMe(uid);
+    }
+  }
+}
