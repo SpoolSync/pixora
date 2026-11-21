@@ -7,9 +7,10 @@
 var APPS={
   spendlog:{name:"Spend Log",cls:"spend",url:"/spend-log/",blurb:"Bills, purchases and returns"},
   splitlog:{name:"Split Log",cls:"split",url:"/split-log/",blurb:"Splits and settling up with friends"},
-  contour:{name:"Contour",cls:"fit",url:"/Contour/",blurb:"Food, workouts and body"}
+  contour:{name:"Contour",cls:"fit",url:"/Contour/",blurb:"Food, workouts and body"},
+  meals:{name:"Meals",cls:"meal",url:"/meals/",blurb:"Meal plan and grocery list"}
 };
-var ORDER=["spendlog","splitlog","contour"];
+var ORDER=["spendlog","meals","splitlog","contour"];
 var ITER=600000;
 var fdb=null,cuser=null,PRIV=null,KID=null,inbox={},unsub=null,screen="home",state="connecting",keepOn=true,hiddenAt=0;
 
@@ -149,6 +150,11 @@ function attention(){
   }
   if(x&&x.totals)Object.keys(x.totals).forEach(function(cur){var v=x.totals[cur];if(v.owe>0)out.push({app:"splitlog",k:"8",text:"You owe "+money(v.owe/100,cur)+" in Split Log"});});
   if(c&&c.d===t&&!c.loggedToday&&new Date().getHours()>=14)out.push({app:"contour",k:"9",text:"No food logged in Contour yet today"});
+  var ml=inbox.meals&&inbox.meals.data;
+  if(ml&&ml.d===t){
+    if(!(ml.today||[]).some(function(m){return m.slot==="dinner";})&&new Date().getHours()>=13)out.push({app:"meals",k:"7",text:"No dinner planned tonight"});
+    if(ml.left>0&&ml.planned7>0)out.push({app:"meals",k:"8",text:ml.left+(ml.left===1?" item":" items")+" on the grocery list"});
+  }
   if(c&&c.workout&&c.workout.today&&!c.workout.doneToday)out.push({app:"contour",k:"9",text:"Today's session: "+c.workout.today});
   out.sort(function(a,b){return String(a.k).localeCompare(String(b.k));});
   return out.slice(0,8);
@@ -164,7 +170,7 @@ function cardShell(k,body){
 function card(k){
   var got=inbox[k];
   if(!got)return cardShell(k,h("div",{class:"empty"},h("p",{text:APPS[k].blurb+". Open "+APPS[k].name+" while signed in to your Pixora account, and its summary shows up here."})));
-  try{return cardShell(k,(k==="spendlog"?spendCard:k==="splitlog"?splitCard:fitCard)(got.data));}
+  try{return cardShell(k,(k==="spendlog"?spendCard:k==="splitlog"?splitCard:k==="meals"?mealCard:fitCard)(got.data));}
   catch(e){return cardShell(k,h("p",{class:"small muted",text:"This summary is from a newer or older version of the app. Open "+APPS[k].name+" once to refresh it."}));}
 }
 function ln(k,v,cls){return h("div",{class:"ln"},h("span",{class:"k",text:k}),h("span",{class:"lead"}),h("span",{class:"v"+(cls?" "+cls:""),text:v}));}
@@ -196,6 +202,13 @@ function splitCard(x){
   });
   (x.groups||[]).forEach(function(g){box.append(ln(g.n,g.net?(g.net>0?"owed ":"owe ")+money(Math.abs(g.net)/100,g.cur):"settled",g.net>0?"pos":g.net<0?"neg":""));});
   box.append(h("p",{class:"small muted",text:x.count+(x.count===1?" group":" groups")}));
+  return box;
+}
+function mealCard(m){
+  var box=h("div",{style:"display:flex;flex-direction:column;gap:10px"}),isToday=m.d===today(),names={breakfast:"Breakfast",lunch:"Lunch",dinner:"Dinner",snack:"Snack"};
+  if(isToday&&(m.today||[]).length){box.append(h("p",{class:"sub",text:"Today"}));m.today.forEach(function(x){box.append(ln(names[x.slot]||x.slot,x.n));});}
+  else box.append(h("p",{class:"sub",text:isToday?"Nothing planned for today.":"Last update: "+dayWord(m.d)+"."}));
+  box.append(ln("Days planned, next 7",String(m.planned7||0)),ln("Grocery list",m.left?m.left+" to get":"All set"));
   return box;
 }
 function fitCard(c){
