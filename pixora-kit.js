@@ -206,7 +206,20 @@ async function joinAccount(){
   if(s)K.pendingLocal=s;
   showSignIn();
 }
-root.PixoraKit={boot:boot,save:save,track:T,status:statusText,signOut:signOut,
+/* Delete this app's data only: the cloud copy, this app's dashboard summary and the copy on this phone.
+   The Pixora login and other apps are untouched; deleting the login itself goes through Pixora by email. */
+async function deleteAppData(){
+  if(K.unsub){K.unsub();K.unsub=null;}clearTimeout(K.pushT);
+  if(!K.local&&K.user){
+    await stateDoc().delete();
+    await K.fdb.doc("apps/dashboard/users/"+K.user.uid+"/inbox/"+K.cfg.app).delete().catch(function(){});
+  }
+  await del("state:"+who()).catch(function(){});
+  K.state=clean({});T("delete_app_data");
+  if(!K.local)listen();
+  K.cfg.onOpen(K.state,{fresh:true});
+}
+root.PixoraKit={boot:boot,save:save,track:T,status:statusText,signOut:signOut,deleteAppData:deleteAppData,
   get state(){return K.state;},get email(){return K.user&&K.user.email;},get local(){return K.local;},
   joinAccount:joinAccount,esc:esc};
 })(typeof self!=="undefined"?self:this);
