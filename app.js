@@ -5,7 +5,7 @@
    by the dashboard passcode, so nobody else can read the summaries: not the server, not the project owner,
    not an AI. Nothing here is sent anywhere else. */
 var APPS={
-  spendlog:{name:"Spend Log",cls:"spend",url:"/spend-log/",blurb:"Bills, purchases and returns"},
+  spendlog:{name:"Tally",cls:"spend",url:"/spend-log/",blurb:"Bills, purchases and returns"},
   splitlog:{name:"Split Log",cls:"split",url:"/split-log/",blurb:"Splits and settling up with friends"},
   contour:{name:"Contour",cls:"fit",url:"/Contour/",blurb:"Food, workouts and body"},
   meals:{name:"Meals",cls:"meal",url:"/meals/",blurb:"Meal plan and grocery list"},
@@ -152,7 +152,7 @@ function attention(){
       (s.subs.warranty||[]).forEach(function(w){out.push({app:"spendlog",k:w.by,text:"Warranty ends: "+w.w,when:dayWord(w.by)});});
     }
     if(s.inbox>0)out.push({app:"spendlog",k:"9",text:s.inbox+(s.inbox===1?" bank row needs":" bank rows need")+" details"});
-    if(s.d===t&&!s.todayDone&&new Date().getHours()>=18)out.push({app:"spendlog",k:"9",text:"Nothing logged in Spend Log today"});
+    if(s.d===t&&!s.todayDone&&new Date().getHours()>=18)out.push({app:"spendlog",k:"9",text:"Nothing logged in Tally today"});
   }
   if(x&&x.totals)Object.keys(x.totals).forEach(function(cur){var v=x.totals[cur];if(v.owe>0)out.push({app:"splitlog",k:"8",text:"You owe "+money(v.owe/100,cur)+" in Split Log"});});
   if(c&&c.d===t&&!c.loggedToday&&new Date().getHours()>=14)out.push({app:"contour",k:"9",text:"No food logged in Contour yet today"});
