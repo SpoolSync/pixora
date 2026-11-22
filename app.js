@@ -81,6 +81,91 @@ async function openKeys(pass,d){
   PRIV=priv;KID=d.kid;
   await remember();
 }
+/* ---------- one Pixora passcode ----------
+   The dashboard's private key is wrapped with a key derived from the Pixora passcode, the same master secret
+   as every Pixora app (apps/pixora/users/<uid>), with info "pixora-app:dashboard" so no app can derive it.
+   Older dashboards wrapped with their own dashboard passcode switch once from a card on the home screen. */
+var pxNeed=null;
+function masterDoc(){return fdb.doc("apps/pixora/users/"+cuser.uid);}
+async function getMk(){var s=await masterDoc().get();var m=s.exists?s.data().mk:null;return m&&m.id?m:null;}
+async function pxKek(m){
+  var base=await crypto.subtle.importKey("raw",m,"HKDF",false,["deriveKey"]),te=new TextEncoder();
+  return crypto.subtle.deriveKey({name:"HKDF",hash:"SHA-256",salt:te.encode("pixora"),info:te.encode("pixora-app:dashboard")},base,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+}
+/* The dashboard's key from the typed Pixora passcode; makes the Pixora passcode if the account has none yet. */
+async function pxKekFor(pass){
+  var mk=await getMk();
+  if(mk){
+    var m;try{var k=await kek(pass,unb64(mk.salt),Math.min(Math.max(+mk.iter||ITER,100000),2000000));
+      m=unb64(JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:"AES-GCM",iv:unb64(mk.iv)},k,unb64(mk.ct)))).m);}
+    catch(e){throw {code:"wrong"};}
+    var kk=await pxKek(m);m.fill(0);return {kek:kk,mk:mk};
+  }
+  var raw=rnd(32),salt=rnd(16),iv=rnd(12),id=b64(rnd(9)).replace(/[+/=]/g,"");
+  var ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv:iv},await kek(pass,salt,ITER),new TextEncoder().encode(JSON.stringify({m:b64(raw)}))));
+  mk={v:1,id:id,salt:b64(salt),iter:ITER,iv:b64(iv),ct:b64(ct)};
+  await masterDoc().set({mk:mk},{merge:true});T("px_passcode_set");
+  var k2=await pxKek(raw);raw.fill(0);return {kek:k2,mk:mk};
+}
+async function makePair(k,mid){
+  var pair=await crypto.subtle.generateKey({name:"ECDH",namedCurve:"P-256"},true,["deriveKey"]);
+  var pub=await crypto.subtle.exportKey("jwk",pair.publicKey),pk8=new Uint8Array(await crypto.subtle.exportKey("pkcs8",pair.privateKey));
+  var iv=rnd(12),ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv:iv},k,pk8));
+  var priv=await crypto.subtle.importKey("pkcs8",pk8,{name:"ECDH",namedCurve:"P-256"},false,["deriveKey"]);pk8.fill(0);
+  var kid=b64(rnd(9)).replace(/[+/=]/g,"");
+  return {priv:priv,pubKey:pair.publicKey,kid:kid,doc:{v:2,kid:kid,pub:{x:pub.x,y:pub.y},px:mid,wiv:b64(iv),wct:b64(ct)}};
+}
+async function createKeysPx(pass){
+  var r=await pxKekFor(pass),p=await makePair(r.kek,r.mk.id);
+  await dashDoc().set(Object.assign({},p.doc,{at:firebase.firestore.FieldValue.serverTimestamp()}));
+  PRIV=p.priv;KID=p.kid;await remember();
+}
+async function openKeysPx(pass,d){
+  var r=await pxKekFor(pass);
+  if(r.mk.id!==d.px)throw {code:"stale"};
+  var pk8=new Uint8Array(await crypto.subtle.decrypt({name:"AES-GCM",iv:unb64(d.wiv)},r.kek,unb64(d.wct)));
+  PRIV=await crypto.subtle.importKey("pkcs8",pk8,{name:"ECDH",namedCurve:"P-256"},false,["deriveKey"]);pk8.fill(0);
+  KID=d.kid;await remember();
+}
+async function sealTo(pub,obj){
+  var eph=await crypto.subtle.generateKey({name:"ECDH",namedCurve:"P-256"},true,["deriveKey"]);
+  var aes=await crypto.subtle.deriveKey({name:"ECDH",public:pub},eph.privateKey,{name:"AES-GCM",length:256},false,["encrypt"]);
+  var iv=rnd(12),ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv:iv},aes,new TextEncoder().encode(JSON.stringify(obj))));
+  var j=await crypto.subtle.exportKey("jwk",eph.publicKey);return {ex:j.x,ey:j.y,iv:b64(iv),ct:b64(ct)};
+}
+/* Move this (unlocked) dashboard to the Pixora passcode: a new key pair, and the summaries already here
+   are re-encrypted to it on this phone, so nothing disappears while the apps catch up. */
+async function pxSwitch(pass){
+  var r=await pxKekFor(pass),p=await makePair(r.kek,r.mk.id);
+  var docs=await inboxCol().get(),moved=[];
+  for(var i=0;i<docs.docs.length;i++){var d=docs.docs[i].data();if(d.kid!==KID)continue;
+    try{var o=await openBox(d),box=await sealTo(p.pubKey,o);moved.push([docs.docs[i].ref,{v:d.v||1,kid:p.kid,ts:d.ts||Date.now(),ex:box.ex,ey:box.ey,iv:box.iv,ct:box.ct}]);}catch(e){}}
+  if(unsub){unsub();unsub=null;}
+  PRIV=p.priv;KID=p.kid;
+  var b=fdb.batch();moved.forEach(function(m){b.set(m[0],m[1]);});b.set(dashDoc(),Object.assign({},p.doc,{at:firebase.firestore.FieldValue.serverTimestamp()}));await b.commit();
+  await remember();pxNeed=null;T("px_switch");listen();render();
+}
+async function pxCheck(d){
+  var need=null;
+  try{if(!d.px)need={why:"switch",mk:await getMk()};else{var mk=await getMk();if(!mk||mk.id!==d.px)need={why:"reset",mk:mk};}}catch(e){return;}
+  var was=pxNeed&&pxNeed.why;pxNeed=need;if((need&&need.why)!==was&&screen==="home"&&PRIV)render();
+}
+function pxCard(){
+  if(!pxNeed)return null;
+  var set=!pxNeed.mk,why=pxNeed.why;
+  var msg=h("p",{class:"err",role:"alert",hidden:true}),p1=h("input",{type:"password",id:"px-p1",autocomplete:set?"new-password":"current-password"}),p2=set?h("input",{type:"password",id:"px-p2",autocomplete:"new-password"}):null;
+  var go=h("button",{type:"submit",class:"btn primary",text:set?"Set passcode":"Continue"});
+  return h("form",{class:"panel pxcard",novalidate:true,onsubmit:async function(ev){
+    ev.preventDefault();msg.hidden=true;
+    if(set&&p1.value.length<4){msg.textContent="Use at least 4 characters.";msg.hidden=false;return;}
+    if(set&&p1.value!==p2.value){msg.textContent="The two passcodes don't match.";msg.hidden=false;return;}
+    go.disabled=true;go.textContent="Working…";
+    try{await pxSwitch(p1.value);toast("Done. Pixora Today now opens with your Pixora passcode.");}
+    catch(e){go.disabled=false;go.textContent=set?"Set passcode":"Continue";msg.textContent=e&&e.code==="wrong"?"That isn't your Pixora passcode.":navigator.onLine===false?"No connection. Connect and try again.":"Something went wrong. Try again.";msg.hidden=false;}
+  }},h("h3",{text:why==="reset"?"Enter your new Pixora passcode":set?"Set your Pixora passcode":"Switch to your Pixora passcode"}),
+    h("p",{class:"small",text:why==="reset"?"Your Pixora passcode was changed or reset in another Pixora app. Enter the current one so this dashboard opens with it.":set?"Pixora Today now uses one Pixora passcode, shared with your apps. Set it once and the dashboard passcode is retired.":"Pixora Today now uses your Pixora passcode, the same one as your apps. Enter it once and the dashboard passcode is retired. Your summaries stay."}),
+    h("div",{class:"field"},h("label",{for:"px-p1",text:"Pixora passcode"}),p1),p2?h("div",{class:"field"},h("label",{for:"px-p2",text:"Repeat it"}),p2):null,msg,go);
+}
 async function remember(){try{keepOn=(await kvGet("keep"))!==false;await kvSet("key",keepOn&&PRIV?{uid:cuser.uid,kid:KID,priv:PRIV}:null);}catch(e){}}
 async function openBox(d){
   var epk=await crypto.subtle.importKey("jwk",{kty:"EC",crv:"P-256",x:d.ex,y:d.ey,ext:true},{name:"ECDH",namedCurve:"P-256"},false,[]);
@@ -93,9 +178,10 @@ function listen(){
   if(unsub)unsub();
   state="connecting";
   /* If the dashboard was started over on another phone, this phone's key no longer fits: ask for the new passcode. */
-  var keyWatch=dashDoc().onSnapshot(function(d){
+  var keyWatch=dashDoc().onSnapshot({includeMetadataChanges:true},function(d){
     if(d.metadata.fromCache)return;
-    if(!d.exists||d.data().kid!==KID){toast("The dashboard was reset on another phone. Enter its new passcode.");lockNow();}
+    if(!d.exists||d.data().kid!==KID){toast(d.exists&&d.data().px?"Pixora Today switched to your Pixora passcode on another phone. Enter it once here.":"The dashboard was reset on another phone. Enter its new passcode.");lockNow();return;}
+    pxCheck(d.data());
   },function(){});
   var inboxUnsub=inboxCol().onSnapshot({includeMetadataChanges:true},async function(snap){
     var next={};
@@ -127,6 +213,7 @@ function render(){
     h("div",null,h("p",{class:"eyebrow",text:d.toLocaleDateString("en-CA",{weekday:"long",month:"long",day:"numeric"})}),h("h1",{text:greet(d)})),
     h("button",{type:"button",class:"btn quiet mini",text:"Settings",onclick:function(){T("settings");screen="settings";render();}})),
     statusChip());
+  var pc=pxCard();if(pc)app.append(pc);
   var items=attention();
   if(items.length){
     var box=h("section",{class:"attn","aria-label":"Needs attention"},h("p",{class:"eyebrow",text:"Needs attention"}));
@@ -281,11 +368,11 @@ function drawSettings(app){
   var every=h("input",{type:"checkbox"});every.checked=!keepOn;
   every.addEventListener("change",function(){keepOn=!every.checked;kvSet("keep",keepOn).then(remember).catch(function(){});});
   app.append(h("div",{class:"panel"},h("h3",{text:"Unlocking"}),
-    h("p",{class:"small muted",text:"After the dashboard passcode is entered once, this phone stays unlocked and your phone's own lock protects it."}),
-    h("label",{style:"display:flex;gap:10px;align-items:center;min-height:44px"},every,h("span",{text:"Ask for the dashboard passcode every time"})),
+    h("p",{class:"small muted",text:"After the passcode is entered once, this phone stays unlocked and your phone's own lock protects it."}),
+    h("label",{style:"display:flex;gap:10px;align-items:center;min-height:44px"},every,h("span",{text:"Ask for the passcode every time"})),
     h("div",{class:"btnrow"},h("button",{type:"button",class:"btn quiet",text:"Lock now",onclick:lockNow}))));
   app.append(h("div",{class:"panel"},h("h3",{text:"Who can see what"}),
-    h("p",{class:"small",text:"Each app turns its numbers into a short summary, encrypts it with this dashboard's public key, and stores it in your own account. Only a dashboard unlocked with your passcode can open it."}),
+    h("p",{class:"small",text:"Each app turns its numbers into a short summary, encrypts it with this dashboard's public key, and stores it in your own account. Only this dashboard, unlocked with your Pixora passcode, can open it."}),
     h("p",{class:"small muted",text:"The Pixora servers see that a summary exists and when it changed, never what's in it. No summary is shown to an AI or to anyone else. Other people can't reach your account's summaries at all."})));
   var reset=armed(h("button",{type:"button",class:"btn danger",text:"Forgot the passcode? Start the dashboard over"}),"Tap again: makes new keys and clears the summaries",async function(){
     await startOver();toast("Dashboard reset. Open each app once to fill it again.");
@@ -315,15 +402,26 @@ function showSignIn(problem){
 async function afterSignIn(){
   var snap;
   try{snap=await dashDoc().get();}catch(e){showSignIn("Couldn't reach your Pixora account. Check the connection and try again.");return;}
-  var d=snap.exists?snap.data():null;
-  showPass(d&&d.wct?d:null);
+  var d=snap.exists?snap.data():null,mk=null;try{mk=await getMk();}catch(e){}
+  showPass(d&&d.wct?d:null,null,!!mk);
 }
-function showPass(existing,problem){
+function showPass(existing,problem,hasMk){
+  /* px: the Pixora passcode (new dashboards, and ones already switched). Older dashboards keep their own passcode until they switch. */
+  var px=!existing||!!existing.px,entering=existing||hasMk,setting=!entering;
   var msg=h("p",{class:"err",role:"alert",hidden:!problem,text:problem||""});
-  var p1=h("input",{type:"password",id:"g-p1",autocomplete:existing?"current-password":"new-password"}),p2=h("input",{type:"password",id:"g-p2",autocomplete:"new-password"});
-  var go=h("button",{type:"submit",class:"btn primary",text:existing?"Unlock":"Set passcode"});
+  var p1=h("input",{type:"password",id:"g-p1",autocomplete:entering?"current-password":"new-password"}),p2=h("input",{type:"password",id:"g-p2",autocomplete:"new-password"});
+  var go=h("button",{type:"submit",class:"btn primary",text:entering?"Unlock":"Set passcode"});
   var form=h("form",{novalidate:true,style:"display:flex;flex-direction:column;gap:14px",onsubmit:async function(ev){
     ev.preventDefault();msg.hidden=true;
+    if(px){
+      if(setting&&p1.value.length<4){msg.textContent="Use at least 4 characters.";msg.hidden=false;return;}
+      if(setting&&p1.value!==p2.value){msg.textContent="The two passcodes don't match.";msg.hidden=false;return;}
+      go.disabled=true;go.textContent=entering?"Unlocking…":"Setting up…";
+      try{if(existing)await openKeysPx(p1.value,existing);else await createKeysPx(p1.value);p1.value=p2.value="";await enter();}
+      catch(e){go.disabled=false;go.textContent=entering?"Unlock":"Set passcode";
+        msg.textContent=e&&e.code==="wrong"?"That isn't your Pixora passcode.":e&&e.code==="stale"?"Your Pixora passcode was reset since this dashboard was set up, so its key can't be opened. Start the dashboard over below; your apps aren't affected.":navigator.onLine===false?"You're offline. Connect once to set up the dashboard.":"Couldn't set up the dashboard. Try again.";msg.hidden=false;}
+      return;
+    }
     if(!existing){
       if(p1.value.length<4){msg.textContent="Use at least 4 characters.";msg.hidden=false;return;}
       if(p1.value!==p2.value){msg.textContent="The two passcodes don't match.";msg.hidden=false;return;}
@@ -337,10 +435,10 @@ function showPass(existing,problem){
       msg.textContent=existing?"Wrong dashboard passcode.":(e&&e.code==="unavailable"?"You're offline. Connect once to set up the dashboard.":"Couldn't set up the dashboard. Try again.");msg.hidden=false;
     }
   }},
-    h("div",{class:"field"},h("label",{for:"g-p1",text:"Dashboard passcode"}),p1),
-    existing?null:h("div",{class:"field"},h("label",{for:"g-p2",text:"Repeat passcode"}),p2),msg,go);
-  gate([h("h1",{text:existing?"Enter your dashboard passcode":"Set a dashboard passcode"}),
-    h("p",{class:"muted",text:existing?"The one you set the first time you used Pixora Today. You type it once per phone.":"It locks the key that opens your apps' summaries. You type it once per phone, then it stays unlocked. It can't be recovered, but you can start the dashboard over without losing anything in your apps."}),
+    h("div",{class:"field"},h("label",{for:"g-p1",text:px?"Pixora passcode":"Dashboard passcode"}),p1),
+    entering?null:h("div",{class:"field"},h("label",{for:"g-p2",text:"Repeat it"}),p2),msg,go);
+  gate([h("h1",{text:px?(entering?"Enter your Pixora passcode":"Set your Pixora passcode"):"Enter your dashboard passcode"}),
+    h("p",{class:"muted",text:px?(entering?"The same passcode you use in your Pixora apps. You type it once on this phone.":"One passcode for every Pixora app. It locks the key that opens your apps' summaries. You type it once per phone. It can't be recovered, so pick one you'll remember."):"The one you set the first time you used Pixora Today. You type it once per phone. After that it switches to your Pixora passcode."}),
     form,
     existing?armed(h("button",{type:"button",class:"btn quiet danger",text:"Forgot it? Start the dashboard over"}),"Tap again: new keys, summaries cleared",async function(){await startOver(true);}):null,
     h("button",{type:"button",class:"btn quiet",text:"Use a different account",onclick:signOutAll})]);
@@ -351,14 +449,15 @@ async function enter(){
   var last=await kvGet("last:"+cuser.uid).catch(function(){return null;});
   if(last&&last.kid===KID)inbox=last.inbox||{};
   render();listen();T("view_today");
+  dashDoc().get({source:"server"}).then(function(d){if(d.exists&&d.data().kid===KID)pxCheck(d.data());}).catch(function(){});
   try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
 }
 async function lockNow(){
   if(unsub){unsub();unsub=null;}
   await kvSet("key",null).catch(function(){});
   PRIV=null;inbox={};
-  var snap=await dashDoc().get().catch(function(){return null;});
-  showPass(snap&&snap.exists?snap.data():null);
+  var snap=await dashDoc().get().catch(function(){return null;}),mk=null;try{mk=await getMk();}catch(e){}
+  showPass(snap&&snap.exists?snap.data():null,null,!!mk);
 }
 async function signOutAll(){
   if(unsub){unsub();unsub=null;}
@@ -374,7 +473,8 @@ async function startOver(fromGate){
   await dashDoc().delete().catch(function(){});
   await kvSet("key",null).catch(function(){});await kvSet("last:"+cuser.uid,null).catch(function(){});
   PRIV=null;KID=null;inbox={};
-  showPass(null,fromGate?null:null);
+  var mk=null;try{mk=await getMk();}catch(e){}
+  showPass(null,null,!!mk);
 }
 document.addEventListener("visibilitychange",function(){
   if(document.hidden){hiddenAt=Date.now();return;}
