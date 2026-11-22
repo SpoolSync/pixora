@@ -145,6 +145,11 @@ function attention(){
   if(s){
     (s.bills||[]).forEach(function(b){if(!b.paid&&b.due&&daysFrom(b.due)<=3&&daysFrom(b.due)>=-3)out.push({app:"spendlog",k:b.due,text:(daysFrom(b.due)<0?"Overdue: ":"Bill: ")+b.n+" "+money(b.amt,s.cur),when:dayWord(b.due)});});
     (s.returns||[]).forEach(function(r){if(daysFrom(r.by)>=0&&daysFrom(r.by)<=5)out.push({app:"spendlog",k:r.by,text:"Last day to return "+r.w,when:dayWord(r.by)});});
+    if(s.subs){
+      (s.subs.ups||[]).forEach(function(u){out.push({app:"spendlog",k:"5",text:u.n+" went up "+money(u.ch,s.cur)});});
+      (s.subs.renew||[]).forEach(function(r){out.push({app:"spendlog",k:r.on,text:r.n+" renews · "+money(r.amt,s.cur),when:dayWord(r.on)});});
+      (s.subs.warranty||[]).forEach(function(w){out.push({app:"spendlog",k:w.by,text:"Warranty ends: "+w.w,when:dayWord(w.by)});});
+    }
     if(s.inbox>0)out.push({app:"spendlog",k:"9",text:s.inbox+(s.inbox===1?" bank row needs":" bank rows need")+" details"});
     if(s.d===t&&!s.todayDone&&new Date().getHours()>=18)out.push({app:"spendlog",k:"9",text:"Nothing logged in Spend Log today"});
   }
@@ -190,6 +195,7 @@ function spendCard(s){
     box.append(h("div",{class:"bar"},h("i",{style:"width:"+pct+"%"})));
     (s.bills||[]).filter(function(b){return !b.paid;}).slice(0,3).forEach(function(b){box.append(ln(b.n+" · "+dayWord(b.due),money(b.amt,cur)));});
   }
+  if(s.subs&&s.subs.count)box.append(ln("Subscriptions ("+s.subs.count+")","about "+money(s.subs.monthly,cur)+"/month"));
   if(s.streak>1)box.append(h("p",{class:"small muted mono",text:s.streak+" days in a row accounted for"}));
   return box;
 }
