@@ -2,6 +2,7 @@
 /* Pixora Admin: how each app is used, so it can be improved. Reads only the anonymous counters and error
    reports under stats/. It has no access to anyone's data: the database rules give the admin nothing else,
    and the data is encrypted anyway. Only the verified admin email can read the counters. */
+var ADMIN="pixora3dstudios@gmail.com";
 var APPS=[["spendlog","Spend Log"],["splitlog","Split Log"],["contour","Contour"],["meals","Meals"],["dashboard","Pixora Today"]];
 var CONSOLE="https://console.firebase.google.com/project/pixora-bca1f";
 var fdb=null,user=null,range=30,data={},errors={},loading=false;
@@ -103,10 +104,16 @@ function appCard(app,name,all,today,week){
 function signIn(root){
   var em=h("input",{type:"email",autocomplete:"username"}),pw=h("input",{type:"password",autocomplete:"current-password"}),msg=h("p",{class:"err",hidden:true});
   root.append(h("div",{class:"gate"},h("p",{class:"eyebrow",text:"Pixora Admin"}),h("h1",{text:"Sign in"}),
-    h("p",{class:"small muted",text:"Usage counts for every Pixora app. Only the Pixora admin account can see them, and they never include anyone's data."}),
+    h("p",{class:"small muted",text:"Usage counts for every Pixora app. Only the Pixora admin account ("+ADMIN+") can see them, and they never include anyone's data. First time? Enter that email and a new password, then tap Create admin account."}),
     h("label",null,"Email",em),h("label",null,"Password",pw),msg,
     h("div",{class:"btnrow"},h("button",{class:"btn",text:"Sign in",onclick:async function(){
       msg.hidden=true;try{await firebase.auth().signInWithEmailAndPassword(em.value.trim(),pw.value);}catch(e){msg.textContent="That email and password don't match a Pixora account.";msg.hidden=false;}
+    }}),h("button",{class:"btn quiet",text:"Create admin account",onclick:async function(){
+      msg.hidden=true;var e=em.value.trim().toLowerCase();
+      if(e!==ADMIN){msg.textContent="Only "+ADMIN+" can be the Pixora admin.";msg.hidden=false;return;}
+      if(pw.value.length<8){msg.textContent="Use a password of at least 8 characters.";msg.hidden=false;return;}
+      try{await firebase.auth().createUserWithEmailAndPassword(e,pw.value);}
+      catch(x){msg.textContent=x&&x.code==="auth/email-already-in-use"?"That email already has a Pixora account. Tap Sign in, or Forgot password if you don't know it.":"Couldn't create it. Try again.";msg.hidden=false;}
     }}),h("button",{class:"btn quiet",text:"Forgot password",onclick:async function(){
       try{await firebase.auth().sendPasswordResetEmail(em.value.trim());}catch(e){}msg.textContent="If that's a Pixora account, a reset link is on its way.";msg.hidden=false;
     }}))));
