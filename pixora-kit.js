@@ -96,6 +96,19 @@ async function openApp(){
   if(!K.local&&(unreadable||!cloud||(local&&(local.ts||0)>(cloud.ts||0))))if(s.ts)push();
   if(!K.local)listen();
   hideGate();K.cfg.onOpen(s,{unreadable:unreadable});summary();T("open_app");
+  if(!K.local&&K.cfg.app!=="legacy")setTimeout(legacyCheck,1500);
+}
+/* If a trusted person has asked to open this person's Legacy file, say so in every Pixora app,
+   so the waiting period actually gets noticed. Reads only the request's status, nothing else. */
+async function legacyCheck(){
+  try{
+    var q=await K.fdb.collection("legacyGrants").where("owner","==",K.user.uid).where("status","==","requested").limit(5).get();
+    if(q.empty||$("#pk-legacy"))return;
+    var st=document.createElement("style");st.textContent="#pk-legacy{position:sticky;top:0;z-index:50;display:block;background:#b42318;color:#fff;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;font:600 14px/1.35 system-ui,sans-serif;text-decoration:none}";
+    var a=document.createElement("a");a.id="pk-legacy";a.href="/legacy/";
+    a.textContent=(q.size===1?"Someone you trust has":q.size+" people you trust have")+" asked to open your Legacy file. If that's not expected, open Legacy and deny it. Tap to open.";
+    document.head.append(st);document.body.prepend(a);T("legacy_alert_seen");
+  }catch(e){}
 }
 function summary(){
   if(K.local||!K.user||!K.cfg.summary||!root.PixoraSummary)return;
@@ -221,5 +234,6 @@ async function deleteAppData(){
 }
 root.PixoraKit={boot:boot,save:save,track:T,status:statusText,signOut:signOut,deleteAppData:deleteAppData,
   get state(){return K.state;},get email(){return K.user&&K.user.email;},get local(){return K.local;},
+  get db(){return K.local?null:K.fdb;},get uid(){return K.user&&!K.local?K.user.uid:null;},
   joinAccount:joinAccount,esc:esc};
 })(typeof self!=="undefined"?self:this);

@@ -19,7 +19,7 @@
   --paper:#eceae4; --card:#fbfaf7; --ink:#17181a; --muted:#5f6266; --line:#d3d0c8;
   --accent:#17181a; --accent-ink:#fbfaf7;
   --good:#1d7a5c; --bad:#bb3d29; --warn:#9a6a00;
-  --spend:#2457c5; --split:#5b36b8; --fit:#c2410c; --meal:#2f7d32; --inv:#0f766e;
+  --spend:#2457c5; --split:#5b36b8; --fit:#c2410c; --meal:#2f7d32; --inv:#0f766e; --leg:#6a3d7c;
   --display:ui-rounded,"SF Pro Rounded",-apple-system,system-ui,sans-serif;
   --body:-apple-system,system-ui,"Segoe UI",sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
@@ -29,7 +29,7 @@
     --paper:#121314; --card:#1c1d1f; --ink:#ebeae6; --muted:#9c9fa3; --line:#323438;
     --accent:#ebeae6; --accent-ink:#121314;
     --good:#5ccaa2; --bad:#f2907c; --warn:#e6b54d;
-    --spend:#8fb0ff; --split:#b9a2ff; --fit:#ffa877; --meal:#7ccf80; --inv:#5fd4c4;
+    --spend:#8fb0ff; --split:#b9a2ff; --fit:#ffa877; --meal:#7ccf80; --inv:#5fd4c4; --leg:#d3a8e6;
     color-scheme:dark;
   }
 }
@@ -73,7 +73,7 @@ a.btn{color:var(--ink)}
 .grid{display:grid;grid-template-columns:1fr;gap:14px}
 @media (min-width:620px){.grid{grid-template-columns:1fr 1fr}.card.wide{grid-column:1/-1}}
 .card{background:var(--card);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;border-top:4px solid var(--c,var(--ink))}
-.card.spend{--c:var(--spend)} .card.split{--c:var(--split)} .card.fit{--c:var(--fit)} .card.meal{--c:var(--meal)} .card.inv{--c:var(--inv)}
+.card.spend{--c:var(--spend)} .card.split{--c:var(--split)} .card.fit{--c:var(--fit)} .card.meal{--c:var(--meal)} .card.inv{--c:var(--inv)} .card.leg{--c:var(--leg)}
 .hide{display:flex;flex-direction:column;gap:8px;cursor:pointer;filter:blur(9px);transition:filter .2s;user-select:none}.hide.shown{filter:none}
 .chead{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
 .chead h2{color:var(--c)}

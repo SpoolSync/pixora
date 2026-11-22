@@ -9,9 +9,12 @@ var APPS={
   splitlog:{name:"Split Log",cls:"split",url:"/split-log/",blurb:"Splits and settling up with friends"},
   contour:{name:"Contour",cls:"fit",url:"/Contour/",blurb:"Food, workouts and body"},
   meals:{name:"Meals",cls:"meal",url:"/meals/",blurb:"Meal plan and grocery list"},
-  invest:{name:"Investments",cls:"inv",url:"/invest/",blurb:"What you own across every account"}
+  invest:{name:"Investments",cls:"inv",url:"/invest/",blurb:"What you own across every account"},
+  legacy:{name:"Legacy",cls:"leg",url:"/legacy/",blurb:"Your will, insurance and wishes, for the people you trust"}
 };
-var ORDER=["spendlog","meals","invest","splitlog","contour"];
+var ORDER=["spendlog","meals","invest","splitlog","contour","legacy"];
+/* Legacy access requests come straight from the request's status (no contents), so they show even before Legacy is opened. */
+var legacyReqs=[];
 var ITER=600000;
 var fdb=null,cuser=null,PRIV=null,KID=null,inbox={},unsub=null,screen="home",state="connecting",keepOn=true,hiddenAt=0;
 
@@ -105,7 +108,11 @@ function listen(){
     kvSet("last:"+cuser.uid,{kid:KID,inbox:inbox}).catch(function(){});
     if(screen==="home")render();else paintStatus();
   },function(){state=navigator.onLine===false?"offline":"error";paintStatus();});
-  unsub=function(){keyWatch();inboxUnsub();};
+  var legUnsub=fdb.collection("legacyGrants").where("owner","==",cuser.uid).where("status","==","requested").onSnapshot(function(q){
+    legacyReqs=q.docs.map(function(d){var x=d.data();return {who:x.trusteeName||"Your trusted person",opens:(x.reqAt&&x.reqAt.toMillis?x.reqAt.toMillis():Date.now())+x.wait*864e5};});
+    if(screen==="home")render();
+  },function(){});
+  unsub=function(){keyWatch();inboxUnsub();legUnsub();};
 }
 addEventListener("online",function(){if(PRIV&&cuser&&state!=="live")listen();});
 addEventListener("offline",function(){state="offline";paintStatus();});
@@ -166,6 +173,9 @@ function attention(){
     Object.keys(iv.room||{}).forEach(function(k){if(iv.room[k]<0)out.push({app:"invest",k:"1",text:k.toUpperCase()+" over-contributed by "+money(-iv.room[k],"CAD")});});
     if(iv.stale>=3)out.push({app:"invest",k:"9",text:iv.stale+" investment prices are over a week old"});
   }
+  legacyReqs.forEach(function(r){out.push({app:"legacy",k:"0",text:r.who+" asked to open your Legacy file. Deny it if unexpected",when:r.opens>Date.now()?"opens "+new Date(r.opens).toLocaleDateString("en-CA",{month:"short",day:"numeric"}):"open now"});});
+  var lg=inbox.legacy&&inbox.legacy.data;
+  if(lg&&lg.n&&lg.due)out.push({app:"legacy",k:"9",text:"Legacy file: time for the yearly review"});
   if(c&&c.workout&&c.workout.today&&!c.workout.doneToday)out.push({app:"contour",k:"9",text:"Today's session: "+c.workout.today});
   out.sort(function(a,b){return String(a.k).localeCompare(String(b.k));});
   return out.slice(0,8);
@@ -181,7 +191,7 @@ function cardShell(k,body){
 function card(k){
   var got=inbox[k];
   if(!got)return cardShell(k,h("div",{class:"empty"},h("p",{text:APPS[k].blurb+". Open "+APPS[k].name+" while signed in to your Pixora account, and its summary shows up here."})));
-  try{return cardShell(k,(k==="spendlog"?spendCard:k==="splitlog"?splitCard:k==="meals"?mealCard:k==="invest"?investCard:fitCard)(got.data));}
+  try{return cardShell(k,(k==="spendlog"?spendCard:k==="splitlog"?splitCard:k==="meals"?mealCard:k==="invest"?investCard:k==="legacy"?legacyCard:fitCard)(got.data));}
   catch(e){return cardShell(k,h("p",{class:"small muted",text:"This summary is from a newer or older version of the app. Open "+APPS[k].name+" once to refresh it."}));}
 }
 function ln(k,v,cls){return h("div",{class:"ln"},h("span",{class:"k",text:k}),h("span",{class:"lead"}),h("span",{class:"v"+(cls?" "+cls:""),text:v}));}
@@ -221,6 +231,13 @@ function mealCard(m){
   if(isToday&&(m.today||[]).length){box.append(h("p",{class:"sub",text:"Today"}));m.today.forEach(function(x){box.append(ln(names[x.slot]||x.slot,x.n));});}
   else box.append(h("p",{class:"sub",text:isToday?"Nothing planned for today.":"Last update: "+dayWord(m.d)+"."}));
   box.append(ln("Days planned, next 7",String(m.planned7||0)),ln("Grocery list",m.left?m.left+" to get":"All set"));
+  return box;
+}
+function legacyCard(v){
+  var box=h("div",{style:"display:flex;flex-direction:column;gap:10px"});
+  box.append(h("p",{class:"sub",text:v.reviewed?"Last reviewed "+fromIso(v.reviewed).toLocaleDateString("en-CA",{month:"long",day:"numeric",year:"numeric"}):"Not reviewed yet"}),
+    ln("Entries",String(v.n||0)));
+  if(legacyReqs.length)box.append(h("p",{class:"small neg",style:"font-weight:600",text:legacyReqs.length===1?"Someone asked to open it.":legacyReqs.length+" people asked to open it."}));
   return box;
 }
 /* Amounts stay blurred until tapped, so the total isn't on screen whenever the dashboard is open. */

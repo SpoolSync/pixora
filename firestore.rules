@@ -77,6 +77,45 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.by == request.auth.uid;
     }
 
+    // Contour: the shared product catalog. Every product anyone scans or adds, with ingredients, readable by all signed-in people.
+    // Anyone can add a product; only the person who added it can change or delete it, except filling in a scanned product that had no calories.
+    function validProduct(d, code) {
+      return d.code == code && code.matches('^[0-9]{6,14}$')
+        && d.keys().hasOnly(['code', 'name', 'brand', 'nameLower', 'serving', 'servingG', 'nut', 'levels', 'grade', 'nova', 'additives', 'allergens', 'traces', 'ingredients', 'image', 'thumb', 'src', 'by', 'at'])
+        && d.name is string && d.name.size() >= 1 && d.name.size() <= 80
+        && d.brand is string && d.brand.size() <= 60
+        && d.nameLower is string && d.nameLower.size() <= 140
+        && d.serving is string && d.serving.size() <= 40
+        && d.servingG is number && d.servingG > 0 && d.servingG <= 2000
+        && d.ingredients is string && d.ingredients.size() <= 5000
+        && d.nut is map && (d.nut.kcal == null || (d.nut.kcal is number && d.nut.kcal >= 0 && d.nut.kcal <= 1000))
+        && d.allergens is list && d.allergens.size() <= 20 && d.traces is list && d.traces.size() <= 20
+        && (!('image' in d) || (d.image is string && d.image.size() <= 300 && (d.image == '' || d.image.matches('^https://images[.]openfoodfacts[.]org/.*'))))
+        && (!('thumb' in d) || (d.thumb is string && d.thumb.size() <= 300 && (d.thumb == '' || d.thumb.matches('^https://images[.]openfoodfacts[.]org/.*'))))
+        && (d.src == 'off' || d.src == 'user')
+        && d.by == request.auth.uid;
+    }
+    match /apps/contour/products/{code} {
+      allow read: if signedIn();
+      allow create: if signedIn() && validProduct(request.resource.data, code);
+      allow update: if signedIn() && validProduct(request.resource.data, code)
+        && (resource.data.by == request.auth.uid || (resource.data.src == 'off' && resource.data.nut.kcal == null));
+      allow delete: if signedIn() && resource.data.by == request.auth.uid && resource.data.src == 'user';
+    }
+
+    // Contour: one pack photo per product, taken by a member and shrunk on the phone. Anyone signed in can see it; only the person who added it can replace or remove it.
+    function validPhoto(d, code) {
+      return code.matches('^[0-9]{6,14}$') && d.keys().hasOnly(['code', 'img', 'by', 'at'])
+        && d.code == code && d.by == request.auth.uid
+        && d.img is string && d.img.size() <= 200000 && d.img.matches('^data:image/jpeg;base64,.*');
+    }
+    match /apps/contour/productPhotos/{code} {
+      allow read: if signedIn();
+      allow create: if signedIn() && validPhoto(request.resource.data, code);
+      allow update: if signedIn() && validPhoto(request.resource.data, code) && resource.data.by == request.auth.uid;
+      allow delete: if signedIn() && resource.data.by == request.auth.uid;
+    }
+
     // Split Log: a group is shared by its members. Joining needs the secret carried in the invite,
     // and everything inside a group is encrypted on the phones with a key the server never sees.
     function splitGroup(db, gid) { return /databases/$(db)/documents/apps/splitlog/groups/$(gid); }
@@ -140,6 +179,66 @@ service cloud.firestore {
         && request.resource.data.v is string && request.resource.data.v.size() <= 20
         && request.resource.data.p is string && request.resource.data.p.size() <= 30
         && request.resource.data.d is string && request.resource.data.d.size() == 10;
+    }
+
+    // Legacy: a person (owner) names a trusted person who can open a copy of their Legacy file after a waiting
+    // period the owner can cancel. The copy is encrypted on the owner's phone with a key sealed to the trusted
+    // person's public key, so the server and Pixora can't read it. These rules decide WHEN the copy can be fetched.
+    function legacyGrant(db, gid) { return get(/databases/$(db)/documents/legacyGrants/$(gid)).data; }
+    function legacyOpen(g) {
+      return g.trustee == request.auth.uid
+        && (g.status == 'released'
+            || (g.status == 'requested' && request.time >= g.reqAt + duration.value(g.wait, 'd')));
+    }
+    match /legacyGrants/{gid} {
+      // An open invite can be fetched by its id (only in the invite link); grants are listed only by the two people in them.
+      allow get: if signedIn() && (resource.data.owner == request.auth.uid
+        || resource.data.get('trustee', '') == request.auth.uid || resource.data.status == 'invited');
+      allow list: if signedIn() && (resource.data.owner == request.auth.uid || resource.data.get('trustee', '') == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.owner == request.auth.uid
+        && request.resource.data.status == 'invited'
+        && request.resource.data.jh is string && request.resource.data.jh.size() == 64
+        && request.resource.data.wait is int && request.resource.data.wait >= 1 && request.resource.data.wait <= 90
+        && request.resource.data.ownerName is string && request.resource.data.ownerName.size() <= 60
+        && request.resource.data.keys().hasOnly(['owner', 'ownerName', 'wait', 'status', 'jh', 'created']);
+      allow update: if signedIn() && (
+        // The trusted person accepts with the secret from the invite link and their public key.
+        (resource.data.status == 'invited'
+          && resource.data.owner != request.auth.uid
+          && request.resource.data.status == 'accepted'
+          && request.resource.data.trustee == request.auth.uid
+          && request.resource.data.trusteeEmail == request.auth.token.email
+          && request.resource.data.trusteeName is string && request.resource.data.trusteeName.size() <= 60
+          && request.resource.data.pub is string && request.resource.data.pub.size() <= 600
+          && hashing.sha256(request.resource.data.tok).toHexString().lower() == resource.data.jh
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'trustee', 'trusteeName', 'trusteeEmail', 'pub', 'tok']))
+        // The owner confirms, changes the waiting period, denies a request or releases now. Never back to an open invite.
+        || (resource.data.owner == request.auth.uid
+          && resource.data.status != 'invited'
+          && request.resource.data.status in ['active', 'released']
+          && request.resource.data.wait is int && request.resource.data.wait >= 1 && request.resource.data.wait <= 90
+          && request.resource.data.get('reqAt', null) == null
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'wk', 'wait', 'reqAt', 'ownerName', 'ownerEmail', 'relAt']))
+        // The trusted person asks to open it; the clock starts at the server's time, not the phone's.
+        || (resource.data.get('trustee', '') == request.auth.uid
+          && resource.data.status == 'active'
+          && request.resource.data.status == 'requested'
+          && request.resource.data.reqAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reqAt']))
+        // ...or withdraws the request.
+        || (resource.data.get('trustee', '') == request.auth.uid
+          && resource.data.status == 'requested'
+          && request.resource.data.status == 'active'
+          && request.resource.data.reqAt == null
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reqAt'])));
+      allow delete: if signedIn() && (resource.data.owner == request.auth.uid || resource.data.get('trustee', '') == request.auth.uid);
+
+      // The encrypted copy: the owner writes it; the trusted person can fetch it only once released or after the wait.
+      match /copy/{doc} {
+        allow read: if signedIn() && (legacyGrant(database, gid).owner == request.auth.uid || legacyOpen(legacyGrant(database, gid)));
+        allow write: if signedIn() && legacyGrant(database, gid).owner == request.auth.uid;
+      }
     }
 
     // Every other Pixora app, including the Pixora Today dashboard: each person's data is private to them.
