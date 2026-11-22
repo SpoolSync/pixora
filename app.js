@@ -8,9 +8,10 @@ var APPS={
   spendlog:{name:"Spend Log",cls:"spend",url:"/spend-log/",blurb:"Bills, purchases and returns"},
   splitlog:{name:"Split Log",cls:"split",url:"/split-log/",blurb:"Splits and settling up with friends"},
   contour:{name:"Contour",cls:"fit",url:"/Contour/",blurb:"Food, workouts and body"},
-  meals:{name:"Meals",cls:"meal",url:"/meals/",blurb:"Meal plan and grocery list"}
+  meals:{name:"Meals",cls:"meal",url:"/meals/",blurb:"Meal plan and grocery list"},
+  invest:{name:"Investments",cls:"inv",url:"/invest/",blurb:"What you own across every account"}
 };
-var ORDER=["spendlog","meals","splitlog","contour"];
+var ORDER=["spendlog","meals","invest","splitlog","contour"];
 var ITER=600000;
 var fdb=null,cuser=null,PRIV=null,KID=null,inbox={},unsub=null,screen="home",state="connecting",keepOn=true,hiddenAt=0;
 
@@ -160,6 +161,11 @@ function attention(){
     if(!(ml.today||[]).some(function(m){return m.slot==="dinner";})&&new Date().getHours()>=13)out.push({app:"meals",k:"7",text:"No dinner planned tonight"});
     if(ml.left>0&&ml.planned7>0)out.push({app:"meals",k:"8",text:ml.left+(ml.left===1?" item":" items")+" on the grocery list"});
   }
+  var iv=inbox.invest&&inbox.invest.data;
+  if(iv){
+    Object.keys(iv.room||{}).forEach(function(k){if(iv.room[k]<0)out.push({app:"invest",k:"1",text:k.toUpperCase()+" over-contributed by "+money(-iv.room[k],"CAD")});});
+    if(iv.stale>=3)out.push({app:"invest",k:"9",text:iv.stale+" investment prices are over a week old"});
+  }
   if(c&&c.workout&&c.workout.today&&!c.workout.doneToday)out.push({app:"contour",k:"9",text:"Today's session: "+c.workout.today});
   out.sort(function(a,b){return String(a.k).localeCompare(String(b.k));});
   return out.slice(0,8);
@@ -175,7 +181,7 @@ function cardShell(k,body){
 function card(k){
   var got=inbox[k];
   if(!got)return cardShell(k,h("div",{class:"empty"},h("p",{text:APPS[k].blurb+". Open "+APPS[k].name+" while signed in to your Pixora account, and its summary shows up here."})));
-  try{return cardShell(k,(k==="spendlog"?spendCard:k==="splitlog"?splitCard:k==="meals"?mealCard:fitCard)(got.data));}
+  try{return cardShell(k,(k==="spendlog"?spendCard:k==="splitlog"?splitCard:k==="meals"?mealCard:k==="invest"?investCard:fitCard)(got.data));}
   catch(e){return cardShell(k,h("p",{class:"small muted",text:"This summary is from a newer or older version of the app. Open "+APPS[k].name+" once to refresh it."}));}
 }
 function ln(k,v,cls){return h("div",{class:"ln"},h("span",{class:"k",text:k}),h("span",{class:"lead"}),h("span",{class:"v"+(cls?" "+cls:""),text:v}));}
@@ -215,6 +221,18 @@ function mealCard(m){
   if(isToday&&(m.today||[]).length){box.append(h("p",{class:"sub",text:"Today"}));m.today.forEach(function(x){box.append(ln(names[x.slot]||x.slot,x.n));});}
   else box.append(h("p",{class:"sub",text:isToday?"Nothing planned for today.":"Last update: "+dayWord(m.d)+"."}));
   box.append(ln("Days planned, next 7",String(m.planned7||0)),ln("Grocery list",m.left?m.left+" to get":"All set"));
+  return box;
+}
+/* Amounts stay blurred until tapped, so the total isn't on screen whenever the dashboard is open. */
+function investCard(v){
+  var box=h("div",{style:"display:flex;flex-direction:column;gap:10px"}),hid=h("div",{class:"hide",role:"button",tabindex:"0","aria-label":"Show amounts"});
+  hid.append(h("p",{class:"sub",text:"Total value"}),h("p",{class:"big",text:money(v.value,"CAD")}),
+    h("p",{class:"small "+(v.gain>=0?"pos":"neg"),text:(v.gain>=0?"+":"−")+money(Math.abs(v.gain),"CAD")+" vs what you paid"}));
+  if(v.week!=null)hid.append(ln("Past week",(v.week>=0?"+":"−")+money(Math.abs(v.week),"CAD"),v.week>=0?"pos":"neg"));
+  Object.keys(v.room||{}).forEach(function(k){hid.append(ln(k.toUpperCase()+" room left",money(v.room[k],"CAD"),v.room[k]<0?"neg":""));});
+  function flip(){hid.classList.toggle("shown");hid.setAttribute("aria-label",hid.classList.contains("shown")?"Hide amounts":"Show amounts");}
+  hid.addEventListener("click",flip);hid.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();flip();}});
+  box.append(hid,h("p",{class:"small muted",text:"Tap to show or hide amounts."}));
   return box;
 }
 function fitCard(c){
