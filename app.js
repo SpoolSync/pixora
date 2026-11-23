@@ -13,6 +13,15 @@ var APPS={
   legacy:{name:"Legacy",cls:"leg",url:"/legacy/",blurb:"Your will, insurance and wishes, for the people you trust"}
 };
 var ORDER=["spendlog","meals","invest","splitlog","contour","legacy"];
+/* One line each for the welcome screen. */
+var INTRO={
+  spendlog:"Bills, spending, subscriptions, returns and warranties, with reminders before things are due.",
+  meals:"Plan the week's meals. The grocery list builds itself from what you plan.",
+  invest:"TFSA, RRSP, FHSA and every other account in one view, with your contribution room.",
+  splitlog:"Split costs with friends by amount, share or percent, add receipts, and settle up.",
+  contour:"Food, workouts and body progress, with sharing with a trainer if you choose.",
+  legacy:"Where your will is, insurance, beneficiaries and wishes, for someone you trust."
+};
 /* Legacy access requests come straight from the request's status (no contents), so they show even before Legacy is opened. */
 var legacyReqs=[];
 var ITER=600000;
@@ -208,6 +217,7 @@ function show(which){$("gate").hidden=which!=="gate";$("app").hidden=which!=="ap
 function render(){
   var app=$("app");app.textContent="";show("app");
   if(screen==="settings")return drawSettings(app);
+  if(screen==="intro")return drawIntro(app);
   var d=new Date();
   app.append(h("header",{class:"top"},
     h("div",null,h("p",{class:"eyebrow",text:d.toLocaleDateString("en-CA",{weekday:"long",month:"long",day:"numeric"})}),h("h1",{text:greet(d)})),
@@ -228,6 +238,23 @@ function render(){
   ORDER.forEach(function(k){grid.append(card(k));});
   app.append(grid);
   app.append(h("p",{class:"small muted",text:"Summaries are encrypted by each app and opened only here. They update whenever you use an app while signed in to your Pixora account."}));
+}
+/* Welcome: what each app is, shown once after setting up, and from Settings any time. */
+function drawIntro(app){
+  T("intro_view");
+  app.append(h("header",null,h("p",{class:"eyebrow",text:"Welcome to Pixora"}),h("h1",{text:"Your apps"}),
+    h("p",{class:"muted",text:"Each app works on its own, even offline. Your account and passcode work in all of them, and this dashboard shows a short summary from each one."})));
+  var list=h("section",{class:"intro"});
+  ORDER.forEach(function(k){var a=APPS[k];
+    list.append(h("a",{class:"irow",href:a.url,onclick:function(){T("intro_open_"+k);}},
+      h("span",{class:"dot",style:"background:var(--"+a.cls+")"}),
+      h("span",{class:"itext"},h("b",{text:a.name}),h("span",{text:INTRO[k]})),h("span",{class:"go",text:"Open"})));
+  });
+  app.append(list);
+  app.append(h("div",{class:"panel"},
+    h("p",{class:"small",text:"Your data is encrypted on your phone before it reaches your account. Nobody else can read it, not Pixora and not any AI."}),
+    h("p",{class:"small muted",text:"Opening an app on a phone for the first time asks for your Pixora passcode once."})));
+  app.append(h("div",{class:"btnrow"},h("button",{type:"button",class:"btn primary",text:"Go to my dashboard",onclick:function(){kvSet("intro",true).catch(function(){});screen="home";render();}})));
 }
 function greet(d){var hr=d.getHours();return hr<5?"Good night":hr<12?"Good morning":hr<17?"Good afternoon":"Good evening";}
 function statusText(){return state==="live"?"Up to date":state==="offline"?"Offline · showing the last copy":state==="error"?"Couldn't reach your account":"Connecting…";}
@@ -377,13 +404,18 @@ function drawSettings(app){
   var reset=armed(h("button",{type:"button",class:"btn danger",text:"Forgot the passcode? Start the dashboard over"}),"Tap again: makes new keys and clears the summaries",async function(){
     await startOver();toast("Dashboard reset. Open each app once to fill it again.");
   });
+  app.append(h("div",{class:"panel"},h("h3",{text:"The apps"}),h("p",{class:"small muted",text:"What each Pixora app does, with links to open them."}),
+    h("div",{class:"btnrow"},h("button",{type:"button",class:"btn",text:"See all apps",onclick:function(){screen="intro";render();}}))));
   app.append(h("div",{class:"panel"},h("h3",{text:"Start over"}),h("p",{class:"small muted",text:"Makes a new dashboard key and passcode for your account. Old summaries can't be opened any more, so they're cleared, and each app sends a fresh one the next time you open it. Your data inside the apps isn't touched."}),reset));
 }
 
 /* ---------- gate: account and passcode ---------- */
 var AUTH_MSG={"auth/invalid-credential":"That email and password don't match a Pixora account.","auth/wrong-password":"That email and password don't match a Pixora account.","auth/user-not-found":"That email and password don't match a Pixora account.","auth/invalid-login-credentials":"That email and password don't match a Pixora account.","auth/email-already-in-use":"There is already a Pixora account with that email. Tap Sign in instead.","auth/weak-password":"Use at least 6 characters for the password.","auth/invalid-email":"That doesn't look like an email address.","auth/network-request-failed":"No connection. Connect to the internet and try again.","auth/too-many-requests":"Too many tries. Wait a few minutes and try again."};
 function gate(nodes){var g=$("gateBody");g.textContent="";add(g,[h("p",{class:"eyebrow",text:"Pixora Today"})].concat(nodes));show("gate");}
-function showSignIn(problem){
+function showSignIn(problem,mode){
+  /* First visit on this phone: sign up first. After an account exists here, sign in first. */
+  if(!mode){try{mode=localStorage.getItem("pixora-has-account")?"signin":"create";}catch(e){mode="create";}}
+  var creating=mode==="create";
   var msg=h("p",{class:"err",role:"alert",hidden:!problem,text:problem||""});
   var em=h("input",{type:"email",id:"g-email",autocomplete:"username",autocapitalize:"off",spellcheck:"false",inputmode:"email"}),pw=h("input",{type:"password",id:"g-pw",autocomplete:"current-password"});
   function go(mode){return async function(){
@@ -391,13 +423,26 @@ function showSignIn(problem){
     try{
       var e=em.value.trim();if(!/^\S+@\S+\.\S+$/.test(e))throw {code:"auth/invalid-email"};
       if(mode==="reset"){await firebase.auth().sendPasswordResetEmail(e);msg.style.color="var(--muted)";msg.textContent="If a Pixora account uses that email, a reset link is on its way.";msg.hidden=false;}
-      else{if(!pw.value)throw {message:"Type your password."};cuser=(mode==="create"?await firebase.auth().createUserWithEmailAndPassword(e,pw.value):await firebase.auth().signInWithEmailAndPassword(e,pw.value)).user;pw.value="";await afterSignIn();return;}
+      else{if(!pw.value)throw {message:"Type your password."};if(mode==="create"&&pw.value.length<6)throw {code:"auth/weak-password"};
+        try{localStorage.setItem("pixora-has-account","1");}catch(e){}T(mode==="create"?"signup":"signin");cuser=(mode==="create"?await firebase.auth().createUserWithEmailAndPassword(e,pw.value):await firebase.auth().signInWithEmailAndPassword(e,pw.value)).user;pw.value="";await afterSignIn();return;}
     }catch(x){msg.textContent=AUTH_MSG[x&&x.code]||(x&&x.message)||"Something went wrong. Try again.";msg.hidden=false;}
     btns.forEach(function(b){b.disabled=false;});
   };}
-  gate([h("h1",{text:"Sign in"}),h("p",{class:"muted",text:"Use the same Pixora account as your apps. The dashboard shows a summary from each one, and only you can read it."}),
-    h("div",{class:"field"},h("label",{for:"g-email",text:"Email"}),em),h("div",{class:"field"},h("label",{for:"g-pw",text:"Password"}),pw),msg,
-    h("div",{class:"btnrow"},h("button",{type:"button",class:"btn primary",text:"Sign in",onclick:go("signin")}),h("button",{type:"button",class:"btn",text:"Create account",onclick:go("create")}),h("button",{type:"button",class:"btn quiet",text:"Forgot password",onclick:go("reset")}))]);
+  if(creating)pw.setAttribute("autocomplete","new-password");
+  function promise(t,d){return h("li",null,h("b",{text:t}),h("span",{text:d}));}
+  gate([h("h1",{text:creating?"Create your Pixora account":"Sign in"}),
+    creating?h("p",{class:"muted",text:"Pixora is a set of private everyday apps: bills, meals, investments, splitting costs, fitness and your will and insurance details."}):
+      h("p",{class:"muted",text:"Use the same Pixora account as your apps."}),
+    creating?h("ul",{class:"promise"},
+      promise("One account for every app.","Sign up once here and use the same email and password in all Pixora apps."),
+      promise("One passcode for extra security.","Next you'll set a Pixora passcode. It encrypts your data on your phone and unlocks every app."),
+      promise("Only you can read your data.","Not other users, not Pixora, not any AI.")):null,
+    h("div",{class:"field"},h("label",{for:"g-email",text:"Email"}),em),
+    h("div",{class:"field"},h("label",{for:"g-pw",text:creating?"Choose a password":"Password"}),pw,creating?h("small",{class:"muted",text:"At least 6 characters."}):null),msg,
+    h("div",{class:"btnrow"},creating?h("button",{type:"button",class:"btn primary",text:"Create account",onclick:go("create")}):h("button",{type:"button",class:"btn primary",text:"Sign in",onclick:go("signin")}),
+      creating?null:h("button",{type:"button",class:"btn quiet",text:"Forgot password",onclick:go("reset")})),
+    h("p",{class:"small muted",style:"text-align:center"},creating?"Already have a Pixora account? ":"New to Pixora? ",
+      h("button",{type:"button",class:"linkish",text:creating?"Sign in":"Create an account",onclick:function(){showSignIn(null,creating?"signin":"create");}}))]);
 }
 async function afterSignIn(){
   var snap;
@@ -438,14 +483,15 @@ function showPass(existing,problem,hasMk){
     h("div",{class:"field"},h("label",{for:"g-p1",text:px?"Pixora passcode":"Dashboard passcode"}),p1),
     entering?null:h("div",{class:"field"},h("label",{for:"g-p2",text:"Repeat it"}),p2),msg,go);
   gate([h("h1",{text:px?(entering?"Enter your Pixora passcode":"Set your Pixora passcode"):"Enter your dashboard passcode"}),
-    h("p",{class:"muted",text:px?(entering?"The same passcode you use in your Pixora apps. You type it once on this phone.":"One passcode for every Pixora app. It locks the key that opens your apps' summaries. You type it once per phone. It can't be recovered, so pick one you'll remember."):"The one you set the first time you used Pixora Today. You type it once per phone. After that it switches to your Pixora passcode."}),
+    h("p",{class:"muted",text:px?(entering?"The same passcode you use in your Pixora apps. You type it once on this phone.":"One passcode for every Pixora app, for extra security. It encrypts your data on this phone and unlocks all your apps. You type it once per phone. It can't be recovered, so pick one you'll remember."):"The one you set the first time you used Pixora Today. You type it once per phone. After that it switches to your Pixora passcode."}),
     form,
     existing?armed(h("button",{type:"button",class:"btn quiet danger",text:"Forgot it? Start the dashboard over"}),"Tap again: new keys, summaries cleared",async function(){await startOver(true);}):null,
     h("button",{type:"button",class:"btn quiet",text:"Use a different account",onclick:signOutAll})]);
   try{p1.focus();}catch(e){}
 }
 async function enter(){
-  screen="home";
+  var seen=await kvGet("intro").catch(function(){return true;});
+  screen=seen?"home":"intro";
   var last=await kvGet("last:"+cuser.uid).catch(function(){return null;});
   if(last&&last.kid===KID)inbox=last.inbox||{};
   render();listen();T("view_today");
