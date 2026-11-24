@@ -120,7 +120,7 @@ var STYLE=".pk-gate{min-height:100vh;min-height:100dvh;display:flex;align-items:
  ".pk-card{width:100%;max-width:420px;background:var(--card);border:2px solid var(--ink);border-radius:14px;padding:22px 18px;display:flex;flex-direction:column;gap:14px}"+
  ".pk-card h1{margin:0;font-size:26px;line-height:1.1}.pk-card p{margin:0}.pk-eb{font-family:ui-monospace,Menlo,monospace;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}"+
  ".pk-f{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:600}.pk-f input{width:100%;border:1px solid var(--line);background:var(--paper);color:inherit;border-radius:8px;padding:10px;min-height:44px;font-size:16px;font-weight:400}"+
- ".pk-row{display:flex;gap:10px;flex-wrap:wrap}.pk-b{border:1px solid var(--ink);background:transparent;color:inherit;border-radius:8px;padding:10px 14px;font:inherit;font-weight:600;cursor:pointer;min-height:44px}"+
+ ".pk-row{display:flex;gap:10px;flex-wrap:wrap}.pk-link{all:unset;cursor:pointer;font-weight:600;text-decoration:underline;color:var(--ink)}.pk-b{border:1px solid var(--ink);background:transparent;color:inherit;border-radius:8px;padding:10px 14px;font:inherit;font-weight:600;cursor:pointer;min-height:44px}"+
  ".pk-b.p{background:var(--ink);color:var(--paper)}.pk-b.q{border-color:var(--line);font-weight:500}.pk-err{color:var(--bad);font-size:14px;font-weight:600;min-height:1px}.pk-mut{color:var(--muted);font-size:14px}";
 function gate(html){
   var g=$("#pk-gate");
@@ -131,20 +131,28 @@ function gate(html){
 }
 function hideGate(){var g=$("#pk-gate");if(g){g.hidden=true;g.innerHTML="";}if(K.cfg.onGate)K.cfg.onGate(false);}
 var AUTH={"auth/invalid-credential":"That email and password don't match a Pixora account.","auth/wrong-password":"That email and password don't match a Pixora account.","auth/user-not-found":"That email and password don't match a Pixora account.","auth/invalid-login-credentials":"That email and password don't match a Pixora account.","auth/email-already-in-use":"There's already a Pixora account with that email. Tap Sign in.","auth/weak-password":"Use at least 6 characters for the password.","auth/invalid-email":"That doesn't look like an email address.","auth/network-request-failed":"No connection. Connect and try again.","auth/too-many-requests":"Too many tries. Wait a few minutes."};
-function showSignIn(){
-  var g=gate('<h1>Sign in</h1><p class="pk-mut">'+esc(K.cfg.blurb||"")+' Use your Pixora account to keep it on all your phones. Everything is encrypted on your phone first, so nobody else can read it, not even Pixora.</p>'+
+/* First visit on this phone (the flag is shared by every Pixora app on this site): lead with Create account. */
+function showSignIn(mode){
+  if(!mode){try{mode=localStorage.getItem("pixora-has-account")?"signin":"create";}catch(e){mode="signin";}}
+  var c=mode==="create";
+  var g=gate((c?'<h1>Create your Pixora account</h1><p class="pk-mut">'+esc(K.cfg.blurb||"")+' One Pixora account and one passcode work in every Pixora app. Everything is encrypted on your phone first, so nobody else can read it, not even Pixora.</p>'
+      :'<h1>Sign in</h1><p class="pk-mut">'+esc(K.cfg.blurb||"")+' Use your Pixora account, the same one as your other Pixora apps. Everything is encrypted on your phone first, so nobody else can read it, not even Pixora.</p>')+
     '<label class="pk-f">Email<input id="pk-em" type="email" autocomplete="username" autocapitalize="off" inputmode="email"></label>'+
-    '<label class="pk-f">Password<input id="pk-pw" type="password" autocomplete="current-password"></label><p class="pk-err" id="pk-err"></p>'+
-    '<div class="pk-row"><button class="pk-b p" data-m="signin">Sign in</button><button class="pk-b" data-m="create">Create account</button><button class="pk-b q" data-m="reset">Forgot password</button></div>'+
+    '<label class="pk-f">'+(c?"Choose a password":"Password")+'<input id="pk-pw" type="password" autocomplete="'+(c?"new-password":"current-password")+'"></label><p class="pk-err" id="pk-err"></p>'+
+    '<div class="pk-row">'+(c?'<button class="pk-b p" data-m="create">Create account</button>':'<button class="pk-b p" data-m="signin">Sign in</button><button class="pk-b q" data-m="reset">Forgot password</button>')+'</div>'+
+    '<p class="pk-mut" style="font-size:14px">'+(c?'Already have a Pixora account? <button class="pk-link" data-m="tosignin">Sign in</button>':'New to Pixora? <button class="pk-link" data-m="tocreate">Create an account</button>')+'</p>'+
     '<button class="pk-b q" data-m="local" style="align-self:flex-start">Use on this phone only, without an account</button>');
   g.onclick=async function(e){
     var b=e.target.closest("[data-m]");if(!b)return;var m=b.dataset.m,err=$("#pk-err");err.textContent="";err.style.color="";
     if(m==="local"){K.local=true;T("local_only");return openApp();}
+    if(m==="tosignin"||m==="tocreate")return showSignIn(m==="tosignin"?"signin":"create");
     var em=$("#pk-em").value.trim(),pw=$("#pk-pw").value;
     try{
       if(!/^\S+@\S+\.\S+$/.test(em))throw {code:"auth/invalid-email"};
       if(m==="reset"){await firebase.auth().sendPasswordResetEmail(em);err.style.color="var(--muted)";err.textContent="If that's a Pixora account, a reset link is on its way.";return;}
       if(!pw)throw {message:"Type your password."};
+      if(m==="create"&&pw.length<6)throw {code:"auth/weak-password"};
+      try{localStorage.setItem("pixora-has-account","1");}catch(e){}
       b.disabled=true;
       if(m==="create")await firebase.auth().createUserWithEmailAndPassword(em,pw);else await firebase.auth().signInWithEmailAndPassword(em,pw);
       T(m==="create"?"account_create":"signin");
