@@ -224,6 +224,7 @@ function render(){
     h("button",{type:"button",class:"btn quiet mini",text:"Settings",onclick:function(){T("settings");screen="settings";render();}})),
     statusChip());
   var pc=pxCard();if(pc)app.append(pc);
+  var ic=installCard();if(ic)app.append(ic);
   var items=attention();
   if(items.length){
     var box=h("section",{class:"attn","aria-label":"Needs attention"},h("p",{class:"eyebrow",text:"Needs attention"}));
@@ -251,11 +252,34 @@ function drawIntro(app){
       h("span",{class:"itext"},h("b",{text:a.name}),h("span",{text:INTRO[k]})),h("span",{class:"go",text:"Open"})));
   });
   app.append(list);
+  var ic2=installCard();if(ic2)app.append(ic2);
   app.append(h("div",{class:"panel"},
     h("p",{class:"small",text:"Your data is encrypted on your phone before it reaches your account. Nobody else can read it, not Pixora and not any AI."}),
     h("p",{class:"small muted",text:"Opening an app on a phone for the first time asks for your Pixora passcode once."}),
     h("p",{class:"small muted"},"Something missing or broken? ",h("button",{type:"button",class:"linkish",text:"Tell Sachin",onclick:function(){if(window.PixoraFeedback)PixoraFeedback.open("dashboard","Pixora");}}))));
   app.append(h("div",{class:"btnrow"},h("button",{type:"button",class:"btn primary",text:"Go to my dashboard",onclick:function(){kvSet("intro",true).catch(function(){});screen="home";render();}})));
+}
+/* Add to Home Screen: Pixora works best as a home-screen app (full screen, its own icon, and needed for
+   notifications on iPhone). Shown on the dashboard until it's installed or dismissed. */
+function isInstalled(){return (window.matchMedia&&matchMedia("(display-mode: standalone)").matches)||navigator.standalone===true;}
+function platform(){var u=navigator.userAgent||"";return /iPhone|iPad|iPod/.test(u)||(/Macintosh/.test(u)&&navigator.maxTouchPoints>1)?"ios":/Android/.test(u)?"android":"other";}
+var installEvt=null;window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();installEvt=e;if(screen==="home"&&PRIV)render();});
+function installSteps(){
+  var pf=platform();
+  if(pf==="ios")return ["Open this page in Safari (not inside WhatsApp or Instagram: tap ⋯ or the compass to open in Safari).","Tap the Share button, the square with an arrow.","Scroll down and tap Add to Home Screen, then Add."];
+  if(pf==="android")return ["Open this page in Chrome.","Tap ⋮ at the top right.","Tap Add to Home screen or Install app."];
+  return ["In Chrome or Edge, use the install icon in the address bar, or the menu's Install Pixora Today.","On a phone it works best: open this link there and add it to the home screen."];
+}
+function installCard(){
+  if(isInstalled())return null;
+  var hid=false;try{hid=localStorage.getItem("pixora-install-hide")==="1";}catch(e){}
+  if(hid)return null;
+  var body=h("section",{class:"panel install"},h("h3",{text:"Put Pixora on your home screen"}),
+    h("p",{class:"small muted",text:"It opens full screen like a normal app, works offline, and you'll find it in one tap."}));
+  if(installEvt)body.append(h("div",{class:"btnrow"},h("button",{type:"button",class:"btn primary",text:"Install",onclick:async function(){installEvt.prompt();try{var r=await installEvt.userChoice;T("install_"+r.outcome);}catch(e){}installEvt=null;render();}})));
+  else body.append(h("ol",{class:"steps"},installSteps().map(function(t){return h("li",{text:t});})));
+  body.append(h("div",{class:"btnrow"},h("button",{type:"button",class:"btn quiet mini",text:"Hide this",onclick:function(){try{localStorage.setItem("pixora-install-hide","1");}catch(e){}T("install_hide");render();}})));
+  return body;
 }
 function greet(d){var hr=d.getHours();return hr<5?"Good night":hr<12?"Good morning":hr<17?"Good afternoon":"Good evening";}
 function statusText(){return state==="live"?"Up to date":state==="offline"?"Offline · showing the last copy":state==="error"?"Couldn't reach your account":"Connecting…";}
@@ -405,6 +429,7 @@ function drawSettings(app){
   var reset=armed(h("button",{type:"button",class:"btn danger",text:"Forgot the passcode? Start the dashboard over"}),"Tap again: makes new keys and clears the summaries",async function(){
     await startOver();toast("Dashboard reset. Open each app once to fill it again.");
   });
+  if(!isInstalled())app.append(h("div",{class:"panel"},h("h3",{text:"Home screen"}),h("ol",{class:"steps"},installSteps().map(function(t){return h("li",{text:t});}))));
   app.append(h("div",{class:"panel"},h("h3",{text:"Ideas or problems?"}),h("p",{class:"small muted",text:"Tell Sachin what would make Pixora better or what went wrong, in any app. Nothing from your data is sent."}),
     h("div",{class:"btnrow"},h("button",{type:"button",class:"btn",text:"Send feedback",onclick:function(){if(window.PixoraFeedback)PixoraFeedback.open("dashboard","Pixora");}}))));
   app.append(h("div",{class:"panel"},h("h3",{text:"The apps"}),h("p",{class:"small muted",text:"What each Pixora app does, with links to open them."}),
@@ -497,7 +522,7 @@ async function enter(){
   screen=seen?"home":"intro";
   var last=await kvGet("last:"+cuser.uid).catch(function(){return null;});
   if(last&&last.kid===KID)inbox=last.inbox||{};
-  render();listen();T("view_today");
+  render();listen();T("view_today");if(isInstalled())T("open_installed");
   dashDoc().get({source:"server"}).then(function(d){if(d.exists&&d.data().kid===KID)pxCheck(d.data());}).catch(function(){});
   try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
 }

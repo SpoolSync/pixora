@@ -232,8 +232,24 @@ async function deleteAppData(){
   if(!K.local)listen();
   K.cfg.onOpen(K.state,{fresh:true});
 }
+/* A readable copy of this app's data, as a file the person keeps. It is NOT encrypted, so the app says so.
+   cfg.exportable(state) can leave out things that must stay secret (Legacy leaves out its keys). */
+function exportCopy(){
+  var st=K.cfg.exportable?K.cfg.exportable(K.state):K.state,d=new Date(),z=function(n){return String(n).padStart(2,"0");};
+  var day=d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate());
+  var blob=new Blob([JSON.stringify({pixora:K.cfg.app,v:1,saved:d.toISOString(),state:st},null,1)],{type:"application/json"});
+  var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=K.cfg.app+"-copy-"+day+".json";document.body.append(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},2000);T("export_copy");
+}
+/* Bring back a copy made by exportCopy. Replaces what's here; cfg.restore(current, fromFile) can keep parts (Legacy keeps its keys). */
+function restoreCopy(text){
+  var o;try{o=JSON.parse(text);}catch(e){throw {code:"notjson"};}
+  if(!o||o.pixora!==K.cfg.app||!o.state)throw {code:"wrongapp",app:o&&o.pixora};
+  var s=K.cfg.clean(o.state);if(K.cfg.restore)s=K.cfg.restore(K.state,s);
+  s.ts=Date.now();K.state=s;save(s);K.cfg.onOpen(s,{restored:true});T("restore_copy");return s;
+}
 root.PixoraKit={boot:boot,save:save,track:T,status:statusText,signOut:signOut,deleteAppData:deleteAppData,
   get state(){return K.state;},get email(){return K.user&&K.user.email;},get local(){return K.local;},
   get db(){return K.local?null:K.fdb;},get uid(){return K.user&&!K.local?K.user.uid:null;},
-  joinAccount:joinAccount,esc:esc};
+  joinAccount:joinAccount,esc:esc,exportCopy:exportCopy,restoreCopy:restoreCopy};
 })(typeof self!=="undefined"?self:this);
