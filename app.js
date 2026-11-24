@@ -10,9 +10,10 @@ var APPS={
   contour:{name:"Contour",cls:"fit",url:"/Contour/",blurb:"Food, workouts and body"},
   meals:{name:"Meals",cls:"meal",url:"/meals/",blurb:"Meal plan and grocery list"},
   invest:{name:"Investments",cls:"inv",url:"/invest/",blurb:"What you own across every account"},
-  legacy:{name:"Legacy",cls:"leg",url:"/legacy/",blurb:"Your will, insurance and wishes, for the people you trust"}
+  legacy:{name:"Legacy",cls:"leg",url:"/legacy/",blurb:"Your will, insurance and wishes, for the people you trust"},
+  bake:{name:"Bake",cls:"bake",url:"/bake/",blurb:"Baker's percentages, any batch or pan size"}
 };
-var ORDER=["spendlog","meals","invest","splitlog","contour","legacy"];
+var ORDER=["spendlog","meals","invest","splitlog","contour","bake","legacy"];
 /* One line each for the welcome screen. */
 var INTRO={
   spendlog:"Bills, spending, subscriptions, returns and warranties, with reminders before things are due.",
@@ -20,7 +21,8 @@ var INTRO={
   invest:"TFSA, RRSP, FHSA and every other account in one view, with your contribution room.",
   splitlog:"Split costs with friends by amount, share or percent, add receipts, and settle up.",
   contour:"Food, workouts and body progress, with sharing with a trainer if you choose.",
-  legacy:"Where your will is, insurance, beneficiaries and wishes, for someone you trust."
+  legacy:"Where your will is, insurance, beneficiaries and wishes, for someone you trust.",
+  bake:"Baker's percentages and hydration, any batch or pan size, cups to grams, costing and a bake log."
 };
 /* Legacy access requests come straight from the request's status (no contents), so they show even before Legacy is opened. */
 var legacyReqs=[];
@@ -238,6 +240,9 @@ function render(){
   var grid=h("section",{class:"grid"});
   ORDER.forEach(function(k){grid.append(card(k));});
   app.append(grid);
+  var evn=calendarEvents().length;
+  if(evn)app.append(h("section",{class:"panel"},h("h3",{text:"Get reminders in your calendar"}),h("p",{class:"small muted",text:evn+" upcoming date"+(evn===1?"":"s")+" (bills, renewals, returns, deadlines). Add them to your phone's calendar with an alert the day before. Do it again whenever things change; the same dates update instead of doubling."}),
+    h("div",{class:"btnrow"},h("button",{type:"button",class:"btn",text:"Add to my calendar",onclick:downloadCalendar}))));
   app.append(h("p",{class:"small muted",text:"Summaries are encrypted by each app and opened only here. They update whenever you use an app while signed in to your Pixora account."}));
 }
 /* Welcome: what each app is, shown once after setting up, and from Settings any time. */
@@ -330,7 +335,7 @@ function cardShell(k,body){
 function card(k){
   var got=inbox[k];
   if(!got)return cardShell(k,h("div",{class:"empty"},h("p",{text:APPS[k].blurb+". Open "+APPS[k].name+" while signed in to your Pixora account, and its summary shows up here."})));
-  try{return cardShell(k,(k==="spendlog"?spendCard:k==="splitlog"?splitCard:k==="meals"?mealCard:k==="invest"?investCard:k==="legacy"?legacyCard:fitCard)(got.data));}
+  try{return cardShell(k,(k==="spendlog"?spendCard:k==="splitlog"?splitCard:k==="meals"?mealCard:k==="invest"?investCard:k==="legacy"?legacyCard:k==="bake"?bakeCard:fitCard)(got.data));}
   catch(e){return cardShell(k,h("p",{class:"small muted",text:"This summary is from a newer or older version of the app. Open "+APPS[k].name+" once to refresh it."}));}
 }
 function ln(k,v,cls){return h("div",{class:"ln"},h("span",{class:"k",text:k}),h("span",{class:"lead"}),h("span",{class:"v"+(cls?" "+cls:""),text:v}));}
@@ -371,6 +376,45 @@ function mealCard(m){
   else box.append(h("p",{class:"sub",text:isToday?"Nothing planned for today.":"Last update: "+dayWord(m.d)+"."}));
   box.append(ln("Days planned, next 7",String(m.planned7||0)),ln("Grocery list",m.left?m.left+" to get":"All set"));
   return box;
+}
+function bakeCard(v){
+  var box=h("div",{style:"display:flex;flex-direction:column;gap:10px"});
+  box.append(ln("Formulas",String(v.formulas||0)),ln("Bakes this month",String(v.month||0)));
+  if(v.last)box.append(h("p",{class:"small muted",text:"Last: "+v.last.n+" · "+fromIso(v.last.d).toLocaleDateString("en-CA",{month:"short",day:"numeric"})+(v.last.stars?" · "+"★".repeat(v.last.stars):"")}));
+  return box;
+}
+/* ---------- calendar ----------
+   Phones can't be sent reminders by these apps without a paid server, but the phone's own calendar can
+   remind. This builds a calendar file of dated things from the summaries (bills, renewals, returns,
+   warranties, RRSP deadline), each with an alert the day before. Made on the phone; nothing is uploaded. */
+function icsEsc(t){return String(t).replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\n/g,"\\n");}
+function icsDate(iso){return iso.replace(/-/g,"");}
+function nextDay(iso){var d=fromIso(iso);d.setDate(d.getDate()+1);return d.getFullYear()+String(d.getMonth()+1).padStart(2,"0")+String(d.getDate()).padStart(2,"0");}
+function hash(t){var x=0;for(var i=0;i<t.length;i++)x=(x*31+t.charCodeAt(i))|0;return (x>>>0).toString(36);}
+function calendarEvents(){
+  var ev=[],t=today(),s=inbox.spendlog&&inbox.spendlog.data,iv=inbox.invest&&inbox.invest.data,lg=inbox.legacy&&inbox.legacy.data;
+  function add(app,date,title,note){if(!date||!/^\d{4}-\d{2}-\d{2}$/.test(date)||date<t)return;ev.push({uid:app+"-"+hash(title+date),d:date,title:title,note:note||""});}
+  if(s){var cur=s.cur||"CAD";
+    (s.bills||[]).forEach(function(b){if(!b.paid)add("bill",b.due,"Bill: "+b.n+" "+money(b.amt,cur),"From Tally");});
+    (s.returns||[]).forEach(function(r){add("return",r.by,"Last day to return "+r.w,"From Tally");});
+    if(s.subs){(s.subs.renew||[]).forEach(function(r){add("renew",r.on,r.n+" renews · "+money(r.amt,cur),"From Tally. Cancel before this if you don't want it.");});
+      (s.subs.warranty||[]).forEach(function(w){add("warranty",w.by,"Warranty ends: "+w.w,"From Tally");});}
+  }
+  if(iv&&iv.room&&iv.room.rrsp!=null){var y=new Date().getFullYear(),dl=new Date(y+1,0,1);dl.setDate(dl.getDate()+59);
+    var di=dl.getFullYear()+"-"+String(dl.getMonth()+1).padStart(2,"0")+"-"+String(dl.getDate()).padStart(2,"0");add("rrsp",di,"RRSP deadline for "+y+" taxes","From Investments");}
+  if(lg&&lg.n&&lg.due)add("legacy",(function(){var d=new Date();d.setDate(d.getDate()+7);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");})(),"Review your Legacy file","Once a year, and after big life changes");
+  return ev.sort(function(a,b){return a.d.localeCompare(b.d);});
+}
+function calendarFile(ev){
+  var now=new Date().toISOString().replace(/[-:]/g,"").replace(/\.\d+Z$/,"Z"),L=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Pixora//Today//EN","CALSCALE:GREGORIAN","METHOD:PUBLISH"];
+  ev.forEach(function(e){L.push("BEGIN:VEVENT","UID:pixora-"+e.uid+"@spoolsync.github.io","DTSTAMP:"+now,"DTSTART;VALUE=DATE:"+icsDate(e.d),"DTEND;VALUE=DATE:"+nextDay(e.d),
+    "SUMMARY:"+icsEsc(e.title),"DESCRIPTION:"+icsEsc(e.note),"TRANSP:TRANSPARENT","BEGIN:VALARM","ACTION:DISPLAY","DESCRIPTION:"+icsEsc(e.title),"TRIGGER;RELATED=START:-PT15H","END:VALARM","END:VEVENT");});
+  L.push("END:VCALENDAR");return L.join("\r\n")+"\r\n";
+}
+function downloadCalendar(){
+  var ev=calendarEvents();if(!ev.length){toast("Nothing dated coming up yet. Bills, renewals and returns from Tally show up here.");return;}
+  var blob=new Blob([calendarFile(ev)],{type:"text/calendar"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="pixora-dates.ics";document.body.append(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},3000);T("calendar_export");toast("Open the file to add "+ev.length+" date"+(ev.length===1?"":"s")+" to your calendar, with an alert the day before.");
 }
 function legacyCard(v){
   var box=h("div",{style:"display:flex;flex-direction:column;gap:10px"});
