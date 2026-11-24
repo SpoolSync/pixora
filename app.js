@@ -11,9 +11,10 @@ var APPS={
   meals:{name:"Meals",cls:"meal",url:"/meals/",blurb:"Meal plan and grocery list"},
   invest:{name:"Investments",cls:"inv",url:"/invest/",blurb:"What you own across every account"},
   legacy:{name:"Legacy",cls:"leg",url:"/legacy/",blurb:"Your will, insurance and wishes, for the people you trust"},
-  bake:{name:"Bake",cls:"bake",url:"/bake/",blurb:"Baker's percentages, any batch or pan size"}
+  bake:{name:"Bake",cls:"bake",url:"/bake/",blurb:"Baker's percentages, any batch or pan size"},
+  dates:{name:"Dates",cls:"dates",url:"/dates/",blurb:"Birthdays, gift ideas and renewals"}
 };
-var ORDER=["spendlog","meals","invest","splitlog","contour","bake","legacy"];
+var ORDER=["spendlog","meals","invest","splitlog","contour","dates","bake","legacy"];
 /* One line each for the welcome screen. */
 var INTRO={
   spendlog:"Bills, spending, subscriptions, returns and warranties, with reminders before things are due.",
@@ -22,6 +23,7 @@ var INTRO={
   splitlog:"Split costs with friends by amount, share or percent, add receipts, and settle up.",
   contour:"Food, workouts and body progress, with sharing with a trainer if you choose.",
   legacy:"Where your will is, insurance, beneficiaries and wishes, for someone you trust.",
+  dates:"Birthdays and anniversaries with ages and gift ideas, plus passport, licence and health card renewals, all reminded in your phone's calendar.",
   bake:"Baker's percentages and hydration, any batch or pan size, cups to grams, costing and a bake log."
 };
 /* Legacy access requests come straight from the request's status (no contents), so they show even before Legacy is opened. */
@@ -335,7 +337,7 @@ function cardShell(k,body){
 function card(k){
   var got=inbox[k];
   if(!got)return cardShell(k,h("div",{class:"empty"},h("p",{text:APPS[k].blurb+". Open "+APPS[k].name+" while signed in to your Pixora account, and its summary shows up here."})));
-  try{return cardShell(k,(k==="spendlog"?spendCard:k==="splitlog"?splitCard:k==="meals"?mealCard:k==="invest"?investCard:k==="legacy"?legacyCard:k==="bake"?bakeCard:fitCard)(got.data));}
+  try{return cardShell(k,(k==="spendlog"?spendCard:k==="splitlog"?splitCard:k==="meals"?mealCard:k==="invest"?investCard:k==="legacy"?legacyCard:k==="bake"?bakeCard:k==="dates"?datesCard:fitCard)(got.data));}
   catch(e){return cardShell(k,h("p",{class:"small muted",text:"This summary is from a newer or older version of the app. Open "+APPS[k].name+" once to refresh it."}));}
 }
 function ln(k,v,cls){return h("div",{class:"ln"},h("span",{class:"k",text:k}),h("span",{class:"lead"}),h("span",{class:"v"+(cls?" "+cls:""),text:v}));}
@@ -381,6 +383,12 @@ function bakeCard(v){
   var box=h("div",{style:"display:flex;flex-direction:column;gap:10px"});
   box.append(ln("Formulas",String(v.formulas||0)),ln("Bakes this month",String(v.month||0)));
   if(v.last)box.append(h("p",{class:"small muted",text:"Last: "+v.last.n+" · "+fromIso(v.last.d).toLocaleDateString("en-CA",{month:"short",day:"numeric"})+(v.last.stars?" · "+"★".repeat(v.last.stars):"")}));
+  return box;
+}
+function datesCard(v){
+  var box=h("div",{style:"display:flex;flex-direction:column;gap:10px"}),t=today(),n=(v.next||[]).filter(function(x){return x.on>=t;});
+  if(!n.length){box.append(h("p",{class:"sub",text:"Nothing in the next 45 days."}));return box;}
+  n.slice(0,3).forEach(function(x){var d=Math.round((fromIso(x.on)-fromIso(t))/864e5);box.append(ln(x.t+(x.turns!=null?" ("+x.turns+")":""),d===0?"Today":d===1?"Tomorrow":"In "+d+" days"));});
   return box;
 }
 /* ---------- calendar ----------

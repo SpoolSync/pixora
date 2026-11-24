@@ -3,7 +3,7 @@
    reports under stats/. It has no access to anyone's data: the database rules give the admin nothing else,
    and the data is encrypted anyway. Only the verified admin email can read the counters. */
 var ADMIN="pixora3dstudios@gmail.com";
-var APPS=[["spendlog","Tally"],["splitlog","Split Log"],["contour","Contour"],["meals","Meals"],["invest","Investments"],["legacy","Legacy"],["bake","Bake"],["dashboard","Pixora Today"]];
+var APPS=[["spendlog","Tally"],["splitlog","Split Log"],["contour","Contour"],["meals","Meals"],["invest","Investments"],["legacy","Legacy"],["bake","Bake"],["dates","Dates"],["dashboard","Pixora Today"]];
 var CONSOLE="https://console.firebase.google.com/project/pixora-bca1f";
 var fdb=null,user=null,range=30,data={},errors={},loading=false,feedback=[];
 function $(id){return document.getElementById(id);}
