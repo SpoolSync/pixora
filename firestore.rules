@@ -181,6 +181,20 @@ service cloud.firestore {
         && request.resource.data.d is string && request.resource.data.d.size() == 10;
     }
 
+    // Feedback typed into the apps for the Pixora admin. Anonymous unless the person ticks "let them reply",
+    // in which case it carries their own sign-in email (checked here, so nobody can sign as someone else).
+    match /feedback/{id} {
+      allow read, delete: if isPixoraAdmin();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['app', 'kind', 'm', 'd', 'e', 'at'])
+        && request.resource.data.app is string && request.resource.data.app.matches('^[a-z]{2,20}$')
+        && request.resource.data.kind in ['idea', 'bug', 'other']
+        && request.resource.data.m is string && request.resource.data.m.size() >= 1 && request.resource.data.m.size() <= 1500
+        && request.resource.data.d is string && request.resource.data.d.size() == 10
+        && (!('e' in request.resource.data) || request.resource.data.e == request.auth.token.email)
+        && request.resource.data.at == request.time;
+    }
+
     // Legacy: a person (owner) names a trusted person who can open a copy of their Legacy file after a waiting
     // period the owner can cancel. The copy is encrypted on the owner's phone with a key sealed to the trusted
     // person's public key, so the server and Pixora can't read it. These rules decide WHEN the copy can be fetched.

@@ -5,7 +5,7 @@
 var ADMIN="pixora3dstudios@gmail.com";
 var APPS=[["spendlog","Tally"],["splitlog","Split Log"],["contour","Contour"],["meals","Meals"],["invest","Investments"],["legacy","Legacy"],["dashboard","Pixora Today"]];
 var CONSOLE="https://console.firebase.google.com/project/pixora-bca1f";
-var fdb=null,user=null,range=30,data={},errors={},loading=false;
+var fdb=null,user=null,range=30,data={},errors={},loading=false,feedback=[];
 function $(id){return document.getElementById(id);}
 function h(tag,a){var el=document.createElement(tag),k;if(a)for(k in a){var v=a[k];if(v==null||v===false)continue;if(k==="class")el.className=v;else if(k==="text")el.textContent=v;else if(k.slice(0,2)==="on")el.addEventListener(k.slice(2),v);else el.setAttribute(k,v===true?"":v);}
   for(var i=2;i<arguments.length;i++)add(el,arguments[i]);return el;}
@@ -35,6 +35,8 @@ async function load(){
       errors[app]=es.docs.map(function(d){var x=d.data();return {id:d.id,ref:d.ref,m:x.m,v:x.v,p:x.p,d:x.d};});
     }catch(e){data[app]=null;errors[app]=[];data._err=e&&e.code;}
   }
+  try{var fb=await fdb.collection("feedback").orderBy("at","desc").limit(100).get();
+    feedback=fb.docs.map(function(d){var x=d.data();return {ref:d.ref,app:x.app,kind:x.kind,m:x.m,d:x.d,e:x.e||""};});}catch(e){feedback=[];}
   loading=false;render();
 }
 function sum(app,feat,ds){var m=data[app]||{},t=0;ds.forEach(function(d){t+=(m[d]&&m[d][feat])||0;});return t;}
@@ -53,6 +55,16 @@ function render(){
       h("p",{class:"small muted",text:"Only "+("pixora3dstudios@gmail.com")+" can read usage, and only once that email is verified. The admin email is set in the database rules (isPixoraAdmin)."})));
     return;
   }
+  var fbc=h("section",{class:"card"},h("h2",{text:"Feedback"+(feedback.length?" ("+feedback.length+")":"")}));
+  if(!feedback.length)fbc.append(h("p",{class:"small muted",text:"Nothing yet. People can send it from Settings in each app and from the welcome screen."}));
+  var NAMES={};APPS.forEach(function(a){NAMES[a[0]]=a[1];});var KIND={idea:"Idea",bug:"Broken",other:"Other"};
+  feedback.forEach(function(f){
+    var row=h("div",{class:"fb"},h("p",{class:"small muted",text:f.d+" · "+(NAMES[f.app]||f.app)+" · "+(KIND[f.kind]||f.kind)+(f.e?" · ":"")},f.e?h("a",{href:"mailto:"+f.e+"?subject="+encodeURIComponent("Re: your Pixora feedback"),text:f.e}):null),
+      h("p",{class:"fbm",text:f.m}),
+      h("div",{class:"btnrow"},h("button",{class:"btn quiet",text:"Done, remove",onclick:async function(){try{await f.ref.delete();feedback=feedback.filter(function(x){return x!==f;});render();}catch(e){}}})));
+    fbc.append(row);
+  });
+  w.append(fbc);
   var all=days(range),today=all.slice(-1),week=all.slice(-7);
   var tiles=h("section",{class:"tiles"});
   APPS.forEach(function(a){

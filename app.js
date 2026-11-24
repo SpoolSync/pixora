@@ -253,7 +253,8 @@ function drawIntro(app){
   app.append(list);
   app.append(h("div",{class:"panel"},
     h("p",{class:"small",text:"Your data is encrypted on your phone before it reaches your account. Nobody else can read it, not Pixora and not any AI."}),
-    h("p",{class:"small muted",text:"Opening an app on a phone for the first time asks for your Pixora passcode once."})));
+    h("p",{class:"small muted",text:"Opening an app on a phone for the first time asks for your Pixora passcode once."}),
+    h("p",{class:"small muted"},"Something missing or broken? ",h("button",{type:"button",class:"linkish",text:"Tell Sachin",onclick:function(){if(window.PixoraFeedback)PixoraFeedback.open("dashboard","Pixora");}}))));
   app.append(h("div",{class:"btnrow"},h("button",{type:"button",class:"btn primary",text:"Go to my dashboard",onclick:function(){kvSet("intro",true).catch(function(){});screen="home";render();}})));
 }
 function greet(d){var hr=d.getHours();return hr<5?"Good night":hr<12?"Good morning":hr<17?"Good afternoon":"Good evening";}
@@ -404,6 +405,8 @@ function drawSettings(app){
   var reset=armed(h("button",{type:"button",class:"btn danger",text:"Forgot the passcode? Start the dashboard over"}),"Tap again: makes new keys and clears the summaries",async function(){
     await startOver();toast("Dashboard reset. Open each app once to fill it again.");
   });
+  app.append(h("div",{class:"panel"},h("h3",{text:"Ideas or problems?"}),h("p",{class:"small muted",text:"Tell Sachin what would make Pixora better or what went wrong, in any app. Nothing from your data is sent."}),
+    h("div",{class:"btnrow"},h("button",{type:"button",class:"btn",text:"Send feedback",onclick:function(){if(window.PixoraFeedback)PixoraFeedback.open("dashboard","Pixora");}}))));
   app.append(h("div",{class:"panel"},h("h3",{text:"The apps"}),h("p",{class:"small muted",text:"What each Pixora app does, with links to open them."}),
     h("div",{class:"btnrow"},h("button",{type:"button",class:"btn",text:"See all apps",onclick:function(){screen="intro";render();}}))));
   app.append(h("div",{class:"panel"},h("h3",{text:"Start over"}),h("p",{class:"small muted",text:"Makes a new dashboard key and passcode for your account. Old summaries can't be opened any more, so they're cleared, and each app sends a fresh one the next time you open it. Your data inside the apps isn't touched."}),reset));
