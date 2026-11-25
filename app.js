@@ -19,7 +19,7 @@ var ORDER=["spendlog","meals","invest","splitlog","contour","dates","bake","lega
 var INTRO={
   spendlog:"Bills, spending, subscriptions, returns and warranties, with reminders before things are due.",
   meals:"Plan the week's meals. The grocery list builds itself from what you plan.",
-  invest:"Every investment account in one view (TFSA and RRSP, 401(k) and IRA, or demat, PPF and mutual funds), with your contribution room.",
+  invest:"Every investment account in one view (TFSA and RRSP, 401(k) and IRA, ISAs and pensions, or demat, PPF and mutual funds), with your contribution room.",
   splitlog:"Split costs with friends by amount, share or percent, add receipts, and settle up.",
   contour:"Food, workouts and body progress, with sharing with a trainer if you choose.",
   legacy:"Where your will is, insurance, beneficiaries and wishes, for someone you trust.",
@@ -51,12 +51,12 @@ function fromIso(s){var p=String(s).split("-");return new Date(+p[0],+p[1]-1,+p[
 function daysFrom(s){return Math.round((fromIso(s)-fromIso(today()))/86400000);}
 function dayWord(s){var n=daysFrom(s);return n===0?"today":n===1?"tomorrow":n===-1?"yesterday":n<0?(-n)+" days ago":n<7?fromIso(s).toLocaleDateString(LOC(),{weekday:"long"}):fromIso(s).toLocaleDateString(LOC(),{month:"short",day:"numeric"});}
 var fmts={};
-/* Money and dates follow the Pixora country (Canada, the US or India), set in Settings. */
+/* Money and dates follow the Pixora country (Canada, the US, the UK or India), set in Settings. */
 var PC=window.PixoraCountry;
 function LOC(){return PC?PC.locale():"en-CA";}
 function money(n,cur){return PC?PC.money(n||0,{cur:cur||PC.info().cur}):"$"+(+n||0).toFixed(2);}
 function num(n,d){return (+n||0).toLocaleString(LOC(),{maximumFractionDigits:d==null?0:d});}
-var ROOMNAME={tfsa:"TFSA",rrsp:"RRSP",fhsa:"FHSA",k401:"401(k)",ira:"IRA",hsa:"HSA",ppf:"PPF",taxsave:"Tax-saving (80C)"};
+var ROOMNAME={isa:"ISA",cashisa:"Cash ISA",lisa:"Lifetime ISA",pension:"Pension",tfsa:"TFSA",rrsp:"RRSP",fhsa:"FHSA",k401:"401(k)",ira:"IRA",hsa:"HSA",ppf:"PPF",taxsave:"Tax-saving (80C)"};
 function ago(ms){var s=Math.round((Date.now()-ms)/1000);if(s<90)return "just now";var m=Math.round(s/60);if(m<60)return m+" min ago";var hr=Math.round(m/60);if(hr<24)return hr+" h ago";var d=Math.round(hr/24);return d+(d===1?" day ago":" days ago");}
 function rnd(n){return crypto.getRandomValues(new Uint8Array(n));}
 function b64(u){var s="",i;for(i=0;i<u.length;i+=0x8000)s+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(s);}
@@ -421,6 +421,7 @@ function calendarEvents(){
   /* Contribution deadlines: RRSP (Canada), IRA and HSA by tax day (US), PPF and tax-saving by March 31 (India). */
   if(iv&&iv.deadlines){var seen={};Object.keys(iv.deadlines).forEach(function(k){var di=iv.deadlines[k];if(!di||seen[di+k])return;seen[di+k]=1;
       if(iv.c==="US"&&k==="k401")return;
+      if(iv.c==="GB"){if(seen[di])return;seen[di]=1;add("dl-gb",di,"UK tax year ends: ISA and pension allowances"+(iv.period?" for "+iv.period:""),"From Investments. Last day to use this tax year's ISA and pension allowances.");return;}
       add("dl-"+k,di,(ROOMNAME[k]||k)+" deadline"+(iv.period?" for "+iv.period:""),"From Investments. "+(iv.room&&iv.room[k]>0?money(iv.room[k],iv.cur)+" of room left when this was made.":""));});}
   else if(iv&&iv.room&&iv.room.rrsp!=null){var y=new Date().getFullYear(),dl=new Date(y+1,0,1);dl.setDate(dl.getDate()+59);
     var di=dl.getFullYear()+"-"+String(dl.getMonth()+1).padStart(2,"0")+"-"+String(dl.getDate()).padStart(2,"0");add("rrsp",di,"RRSP deadline for "+y+" taxes","From Investments");}
@@ -503,7 +504,7 @@ function drawSettings(app){
   });
   if(PC){var sel=h("select",{"aria-label":"Country",style:"max-width:280px;min-height:44px"});PC.LIST.forEach(function(c){var o=h("option",{value:c[0],text:PC.INFO[c[0]].flag+" "+c[1]});if(c[0]===PC.get())o.selected=true;sel.append(o);});
     sel.addEventListener("change",function(){PC.set(sel.value);});
-    app.append(h("div",{class:"panel"},h("h3",{text:"Country"}),h("p",{class:"small muted",text:"Canada, the US or India. Sets money format and the country-specific parts of every Pixora app: account types and tax deadlines in Investments, renewals in Dates, first steps in Legacy."}),sel));}
+    app.append(h("div",{class:"panel"},h("h3",{text:"Country"}),h("p",{class:"small muted",text:"Canada, the US, the UK or India. Sets money format and the country-specific parts of every Pixora app: account types and tax deadlines in Investments, renewals in Dates, first steps in Legacy."}),sel));}
   if(!isInstalled())app.append(h("div",{class:"panel"},h("h3",{text:"Home screen"}),h("ol",{class:"steps"},installSteps().map(function(t){return h("li",{text:t});}))));
   app.append(h("div",{class:"panel"},h("h3",{text:"Ideas or problems?"}),h("p",{class:"small muted",text:"Tell Sachin what would make Pixora better or what went wrong, in any app. Nothing from your data is sent."}),
     h("div",{class:"btnrow"},h("button",{type:"button",class:"btn",text:"Send feedback",onclick:function(){if(window.PixoraFeedback)PixoraFeedback.open("dashboard","Pixora");}}))));
