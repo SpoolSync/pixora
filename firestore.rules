@@ -116,6 +116,47 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.by == request.auth.uid;
     }
 
+    // Contour coaching. Trainer cards: what members see when they search (no email). Only a verified trainer can list one, only their own.
+    match /apps/contour/trainers/{uid} {
+      allow read: if signedIn();
+      allow create, update: if isMe(uid) && isVerifiedTrainer()
+        && request.resource.data.keys().hasOnly(['uid', 'name', 'city', 'years', 'specs', 'mode', 'bio', 'certs', 'accepting', 'pub', 'at'])
+        && request.resource.data.uid == uid
+        && request.resource.data.name is string && request.resource.data.name.size() >= 1 && request.resource.data.name.size() <= 40
+        && request.resource.data.city is string && request.resource.data.city.size() <= 40
+        && request.resource.data.bio is string && request.resource.data.bio.size() <= 600
+        && request.resource.data.certs is string && request.resource.data.certs.size() <= 160
+        && request.resource.data.specs is list && request.resource.data.specs.size() <= 8
+        && request.resource.data.years is number && request.resource.data.years >= 0 && request.resource.data.years <= 60
+        && request.resource.data.mode in ['In person', 'Online', 'Both']
+        && request.resource.data.accepting is bool && request.resource.data.pub is map;
+      allow delete: if isMe(uid);
+    }
+    // A plan a trainer sends one member they hold a grant for. Encrypted with the member's key; only those two can read it.
+    match /apps/contour/plans/{pid} {
+      // Read by id so a plan that doesn't exist yet can be watched: the id is member_trainer.
+      allow read: if signedIn() && (pid.matches('^' + request.auth.uid + '_[A-Za-z0-9]+$') || pid.matches('^[A-Za-z0-9]+_' + request.auth.uid + '$'));
+      allow create, update: if signedIn() && request.resource.data.trainer == request.auth.uid
+        && pid == request.resource.data.member + '_' + request.auth.uid
+        && exists(/databases/$(database)/documents/apps/contour/grants/$(pid))
+        && request.resource.data.keys().hasOnly(['member', 'trainer', 'at', 'iv', 'ct'])
+        && request.resource.data.ct is string && request.resource.data.ct.size() <= 300000;
+      allow delete: if signedIn() && (resource.data.member == request.auth.uid || resource.data.trainer == request.auth.uid);
+    }
+    // Messages between a member and their trainer, encrypted with the member's key. Only while the member shares.
+    function inThread(gid) {
+      return signedIn() && exists(/databases/$(database)/documents/apps/contour/grants/$(gid))
+        && (get(/databases/$(database)/documents/apps/contour/grants/$(gid)).data.member == request.auth.uid
+          || get(/databases/$(database)/documents/apps/contour/grants/$(gid)).data.trainer == request.auth.uid);
+    }
+    match /apps/contour/threads/{gid}/msgs/{mid} {
+      allow read: if inThread(gid);
+      allow create: if inThread(gid) && request.resource.data.from == request.auth.uid
+        && request.resource.data.keys().hasOnly(['from', 'at', 'iv', 'ct'])
+        && request.resource.data.ct is string && request.resource.data.ct.size() <= 8000;
+      allow delete: if signedIn() && resource.data.from == request.auth.uid;
+    }
+
     // Split Log: a group is shared by its members. Joining needs the secret carried in the invite,
     // and everything inside a group is encrypted on the phones with a key the server never sees.
     function splitGroup(db, gid) { return /databases/$(db)/documents/apps/splitlog/groups/$(gid); }
