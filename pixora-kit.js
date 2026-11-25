@@ -43,14 +43,23 @@ function masterDoc(){return K.fdb.doc("apps/pixora/users/"+K.user.uid);}
 function stateDoc(){return K.fdb.doc("apps/"+K.cfg.app+"/users/"+K.user.uid);}
 async function seal(key,obj){var iv=rnd(12);return {iv:b64(iv),ct:b64(new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv:iv},key,enc.encode(JSON.stringify(obj)))))};}
 async function open(key,box){return JSON.parse(dec.decode(await crypto.subtle.decrypt({name:"AES-GCM",iv:unb64(box.iv)},key,unb64(box.ct))));}
+/* New Pixora passcodes are exactly 4 digits (pixora-pin.js); the account's copy says so with fmt:"pin4". */
 async function setPass(pass){
   var m=rnd(32),salt=rnd(16),w=await seal(await kek(pass,salt,ITER),{m:b64(m)}),mid=b64(rnd(9)).replace(/[+/=]/g,"");
-  await masterDoc().set({mk:{v:1,id:mid,salt:b64(salt),iter:ITER,iv:w.iv,ct:w.ct}},{merge:true});
-  K.key=await appKey(m);m.fill(0);await put("key:"+K.user.uid,{key:K.key,mid:mid});
+  var mk={v:1,id:mid,salt:b64(salt),iter:ITER,iv:w.iv,ct:w.ct};if(/^\d{4}$/.test(pass))mk.fmt="pin4";
+  await masterDoc().set({mk:mk},{merge:true});
+  if(root.PixoraPin)await PixoraPin.remember(m,mid);
+  K.key=await appKey(m);m.fill(0);await put("key:"+K.user.uid,{key:K.key,mid:mid});K.mk=mk;
 }
 async function enterPass(pass,mk){
   var o=await open(await kek(pass,unb64(mk.salt),Math.min(Math.max(+mk.iter||ITER,100000),2000000)),mk);
-  var m=unb64(o.m);K.key=await appKey(m);m.fill(0);await put("key:"+K.user.uid,{key:K.key,mid:mk.id});
+  var m=unb64(o.m);if(root.PixoraPin)await PixoraPin.remember(m,mk.id);
+  K.key=await appKey(m);m.fill(0);await put("key:"+K.user.uid,{key:K.key,mid:mk.id});K.mk=mk;
+}
+/* After opening: an account still on an older passcode is asked once to switch to 4 digits (Not now asks next time). */
+function pinCheck(pass){
+  if(K.local||!K.user||!root.PixoraPin||!K.mk||PixoraPin.isPin4(K.mk))return;
+  PixoraPin.prompt({fdb:K.fdb,uid:K.user.uid,mk:K.mk,mode:"switch",cur:pass||"",onDone:function(n){K.mk=n;}});
 }
 
 /* ---- state ---- */
@@ -175,7 +184,10 @@ async function afterSignIn(){
   var saved=await get("key:"+K.user.uid).catch(function(){return null;}),mk=null,snap=null;
   try{snap=await masterDoc().get();mk=snap.exists?snap.data().mk:null;}
   catch(e){if(saved&&saved.key){K.key=saved.key;return openApp();}return showOffline();}
-  if(saved&&saved.key&&mk&&saved.mid===mk.id){K.key=saved.key;return openApp();}
+  K.mk=mk;
+  if(saved&&saved.key&&mk&&saved.mid===mk.id){K.key=saved.key;await openApp();return pinCheck();}
+  if(mk&&root.PixoraPin){var shared=await PixoraPin.recall(mk.id,K.cfg.app);
+    if(shared){K.key=shared;await put("key:"+K.user.uid,{key:shared,mid:mk.id});T("unlock_shared");await openApp();return pinCheck();}}
   showPass(mk,saved&&mk&&saved.mid!==mk.id);
 }
 function showOffline(){
@@ -185,23 +197,24 @@ function showOffline(){
 function showPass(mk,changed,arm){
   var set=!mk;
   var g=gate('<h1>'+(set?"Set your Pixora passcode":"Enter your Pixora passcode")+'</h1><p class="pk-mut">'+(set
-      ?"One passcode for every Pixora app that uses it. It protects the key that encrypts your data before it leaves the phone. You type it once per phone per app. It can't be recovered, so pick one you'll remember."
+      ?"4 digits, one passcode for every Pixora app. It protects the key that encrypts your data before it leaves the phone. You type it once per phone per app. It can't be recovered, so pick one you'll remember."
       :changed?"Your Pixora passcode was changed or reset on another phone. Enter the current one.":"The same one you use in your other Pixora apps. You type it once on this phone.")+'</p>'+
     '<form id="pk-form" style="display:flex;flex-direction:column;gap:12px"><label class="pk-f">Pixora passcode<input id="pk-p1" type="password" autocomplete="'+(set?"new-password":"current-password")+'"></label>'+
     (set?'<label class="pk-f">Repeat it<input id="pk-p2" type="password" autocomplete="new-password"></label>':"")+
     '<p class="pk-err" id="pk-err"></p><button class="pk-b p" id="pk-go">'+(set?"Set passcode":"Unlock")+'</button></form>'+
     (set?"":'<button class="pk-b q" data-m="forgot" style="align-self:flex-start;color:var(--bad);border-color:var(--bad)">'+(arm?"Tap again: new passcode for all Pixora apps. Cloud copies they can't open are replaced by what's on each phone.":"Forgot it? Start over")+'</button>')+
     '<button class="pk-b q" data-m="out" style="align-self:flex-start">Use a different account</button>');
+  if(root.PixoraPin){PixoraPin.fit($("#pk-p1"),mk,set);PixoraPin.fit($("#pk-p2"),mk,set);}
   try{$("#pk-p1").focus();}catch(e){}
   g.onclick=function(e){var b=e.target.closest("[data-m]");if(!b)return;if(b.dataset.m==="out")return signOut();if(b.dataset.m==="forgot"){if(!arm)return showPass(mk,changed,true);showPass(null);}};
   $("#pk-form").onsubmit=async function(e){
     e.preventDefault();var p1=$("#pk-p1").value,p2=set?$("#pk-p2").value:"",err=$("#pk-err"),go=$("#pk-go");
-    if(set&&p1.length<4){err.textContent="Use at least 4 characters.";return;}
+    if(set&&!/^\d{4}$/.test(p1)){err.textContent="Use exactly 4 digits.";return;}
     if(set&&p1!==p2){err.textContent="The two passcodes don't match.";return;}
     go.disabled=true;go.textContent=set?"Setting up…":"Unlocking…";
     try{if(set)await setPass(p1);else await enterPass(p1,mk);T(set?"passcode_set":"passcode_enter");}
     catch(x){go.disabled=false;go.textContent=set?"Set passcode":"Unlock";err.textContent=set?"Couldn't save. Check the connection and try again.":"That isn't your Pixora passcode.";return;}
-    openApp();
+    await openApp();if(!set)pinCheck(p1);
   };
 }
 async function signOut(){

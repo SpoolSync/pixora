@@ -18,6 +18,12 @@ Live at https://spoolsync.github.io/pixora/
   `apps/dashboard/users/<uid>/inbox/<app>`. The server, the project owner and any AI see
   only ciphertext. Other accounts are refused by the database rules.
 - Nothing is sent when you're not signed in or haven't set up the dashboard.
+- The Pixora passcode is exactly 4 digits and the same in every app. Settings > Pixora passcode
+  changes it for every app; the master key stays the same, so no data is re-encrypted.
+  Accounts with an older passcode are asked once to pick 4 digits (`pixora-pin.js`).
+- Once you unlock one Pixora app in a browser, the others in that browser open without asking
+  (a non-extractable key in this site's storage). Each home-screen app on iPhone has its own
+  storage, so each asks once per phone, then never again.
 - Forgot the passcode? Settings > Start over makes new keys; each app sends a fresh summary
   the next time you open it. Nothing inside the apps is touched.
 
