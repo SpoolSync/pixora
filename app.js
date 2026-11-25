@@ -19,7 +19,7 @@ var ORDER=["spendlog","meals","invest","splitlog","contour","dates","bake","lega
 var INTRO={
   spendlog:"Bills, spending, subscriptions, returns and warranties, with reminders before things are due.",
   meals:"Plan the week's meals. The grocery list builds itself from what you plan.",
-  invest:"TFSA, RRSP, FHSA and every other account in one view, with your contribution room.",
+  invest:"Every investment account in one view (TFSA and RRSP, 401(k) and IRA, or demat, PPF and mutual funds), with your contribution room.",
   splitlog:"Split costs with friends by amount, share or percent, add receipts, and settle up.",
   contour:"Food, workouts and body progress, with sharing with a trainer if you choose.",
   legacy:"Where your will is, insurance, beneficiaries and wishes, for someone you trust.",
@@ -49,10 +49,14 @@ function iso(d){return d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate());
 function today(){return iso(new Date());}
 function fromIso(s){var p=String(s).split("-");return new Date(+p[0],+p[1]-1,+p[2]);}
 function daysFrom(s){return Math.round((fromIso(s)-fromIso(today()))/86400000);}
-function dayWord(s){var n=daysFrom(s);return n===0?"today":n===1?"tomorrow":n===-1?"yesterday":n<0?(-n)+" days ago":n<7?fromIso(s).toLocaleDateString("en-CA",{weekday:"long"}):fromIso(s).toLocaleDateString("en-CA",{month:"short",day:"numeric"});}
+function dayWord(s){var n=daysFrom(s);return n===0?"today":n===1?"tomorrow":n===-1?"yesterday":n<0?(-n)+" days ago":n<7?fromIso(s).toLocaleDateString(LOC(),{weekday:"long"}):fromIso(s).toLocaleDateString(LOC(),{month:"short",day:"numeric"});}
 var fmts={};
-function money(n,cur){cur=cur||"CAD";if(!fmts[cur])fmts[cur]=new Intl.NumberFormat("en-CA",{style:"currency",currency:cur});return fmts[cur].format(n||0).replace(/^CA/,"");}
-function num(n,d){return (+n||0).toLocaleString("en-CA",{maximumFractionDigits:d==null?0:d});}
+/* Money and dates follow the Pixora country (Canada, the US or India), set in Settings. */
+var PC=window.PixoraCountry;
+function LOC(){return PC?PC.locale():"en-CA";}
+function money(n,cur){return PC?PC.money(n||0,{cur:cur||PC.info().cur}):"$"+(+n||0).toFixed(2);}
+function num(n,d){return (+n||0).toLocaleString(LOC(),{maximumFractionDigits:d==null?0:d});}
+var ROOMNAME={tfsa:"TFSA",rrsp:"RRSP",fhsa:"FHSA",k401:"401(k)",ira:"IRA",hsa:"HSA",ppf:"PPF",taxsave:"Tax-saving (80C)"};
 function ago(ms){var s=Math.round((Date.now()-ms)/1000);if(s<90)return "just now";var m=Math.round(s/60);if(m<60)return m+" min ago";var hr=Math.round(m/60);if(hr<24)return hr+" h ago";var d=Math.round(hr/24);return d+(d===1?" day ago":" days ago");}
 function rnd(n){return crypto.getRandomValues(new Uint8Array(n));}
 function b64(u){var s="",i;for(i=0;i<u.length;i+=0x8000)s+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(s);}
@@ -224,7 +228,7 @@ function render(){
   if(screen==="intro")return drawIntro(app);
   var d=new Date();
   app.append(h("header",{class:"top"},
-    h("div",null,h("p",{class:"eyebrow",text:d.toLocaleDateString("en-CA",{weekday:"long",month:"long",day:"numeric"})}),h("h1",{text:greet(d)})),
+    h("div",null,h("p",{class:"eyebrow",text:d.toLocaleDateString(LOC(),{weekday:"long",month:"long",day:"numeric"})}),h("h1",{text:greet(d)})),
     h("button",{type:"button",class:"btn quiet mini",text:"Settings",onclick:function(){T("settings");screen="settings";render();}})),
     statusChip());
   var pc=pxCard();if(pc)app.append(pc);
@@ -316,10 +320,10 @@ function attention(){
   }
   var iv=inbox.invest&&inbox.invest.data;
   if(iv){
-    Object.keys(iv.room||{}).forEach(function(k){if(iv.room[k]<0)out.push({app:"invest",k:"1",text:k.toUpperCase()+" over-contributed by "+money(-iv.room[k],"CAD")});});
+    Object.keys(iv.room||{}).forEach(function(k){if(iv.room[k]<0)out.push({app:"invest",k:"1",text:(ROOMNAME[k]||k.toUpperCase())+" over-contributed by "+money(-iv.room[k],iv.cur||"CAD")});});
     if(iv.stale>=3)out.push({app:"invest",k:"9",text:iv.stale+" investment prices are over a week old"});
   }
-  legacyReqs.forEach(function(r){out.push({app:"legacy",k:"0",text:r.who+" asked to open your Legacy file. Deny it if unexpected",when:r.opens>Date.now()?"opens "+new Date(r.opens).toLocaleDateString("en-CA",{month:"short",day:"numeric"}):"open now"});});
+  legacyReqs.forEach(function(r){out.push({app:"legacy",k:"0",text:r.who+" asked to open your Legacy file. Deny it if unexpected",when:r.opens>Date.now()?"opens "+new Date(r.opens).toLocaleDateString(LOC(),{month:"short",day:"numeric"}):"open now"});});
   var lg=inbox.legacy&&inbox.legacy.data;
   if(lg&&lg.n&&lg.due)out.push({app:"legacy",k:"9",text:"Legacy file: time for the yearly review"});
   if(c&&c.workout&&c.workout.today&&!c.workout.doneToday)out.push({app:"contour",k:"9",text:"Today's session: "+c.workout.today});
@@ -344,7 +348,7 @@ function ln(k,v,cls){return h("div",{class:"ln"},h("span",{class:"k",text:k}),h(
 
 function spendCard(s){
   var cur=s.cur||"CAD",box=h("div",{style:"display:flex;flex-direction:column;gap:10px"}),sameMonth=s.month===today().slice(0,7);
-  box.append(h("p",{class:"sub",text:sameMonth?"Spent this month":"Spent in "+fromIso(s.month+"-01").toLocaleDateString("en-CA",{month:"long"})}),h("p",{class:"big",text:money(s.spent,cur)}));
+  box.append(h("p",{class:"sub",text:sameMonth?"Spent this month":"Spent in "+fromIso(s.month+"-01").toLocaleDateString(LOC(),{month:"long"})}),h("p",{class:"big",text:money(s.spent,cur)}));
   if(sameMonth&&s.lastMonthSoFar>0){
     var diff=s.spent-s.lastMonthSoFar;
     box.append(h("p",{class:"small "+(diff>0?"neg":"pos"),text:(diff>0?money(diff,cur)+" more":money(-diff,cur)+" less")+" than this point last month"}));
@@ -382,7 +386,7 @@ function mealCard(m){
 function bakeCard(v){
   var box=h("div",{style:"display:flex;flex-direction:column;gap:10px"});
   box.append(ln("Formulas",String(v.formulas||0)),ln("Bakes this month",String(v.month||0)));
-  if(v.last)box.append(h("p",{class:"small muted",text:"Last: "+v.last.n+" · "+fromIso(v.last.d).toLocaleDateString("en-CA",{month:"short",day:"numeric"})+(v.last.stars?" · "+"★".repeat(v.last.stars):"")}));
+  if(v.last)box.append(h("p",{class:"small muted",text:"Last: "+v.last.n+" · "+fromIso(v.last.d).toLocaleDateString(LOC(),{month:"short",day:"numeric"})+(v.last.stars?" · "+"★".repeat(v.last.stars):"")}));
   return box;
 }
 function datesCard(v){
@@ -408,7 +412,11 @@ function calendarEvents(){
     if(s.subs){(s.subs.renew||[]).forEach(function(r){add("renew",r.on,r.n+" renews · "+money(r.amt,cur),"From Tally. Cancel before this if you don't want it.");});
       (s.subs.warranty||[]).forEach(function(w){add("warranty",w.by,"Warranty ends: "+w.w,"From Tally");});}
   }
-  if(iv&&iv.room&&iv.room.rrsp!=null){var y=new Date().getFullYear(),dl=new Date(y+1,0,1);dl.setDate(dl.getDate()+59);
+  /* Contribution deadlines: RRSP (Canada), IRA and HSA by tax day (US), PPF and tax-saving by March 31 (India). */
+  if(iv&&iv.deadlines){var seen={};Object.keys(iv.deadlines).forEach(function(k){var di=iv.deadlines[k];if(!di||seen[di+k])return;seen[di+k]=1;
+      if(iv.c==="US"&&k==="k401")return;
+      add("dl-"+k,di,(ROOMNAME[k]||k)+" deadline"+(iv.period?" for "+iv.period:""),"From Investments. "+(iv.room&&iv.room[k]>0?money(iv.room[k],iv.cur)+" of room left when this was made.":""));});}
+  else if(iv&&iv.room&&iv.room.rrsp!=null){var y=new Date().getFullYear(),dl=new Date(y+1,0,1);dl.setDate(dl.getDate()+59);
     var di=dl.getFullYear()+"-"+String(dl.getMonth()+1).padStart(2,"0")+"-"+String(dl.getDate()).padStart(2,"0");add("rrsp",di,"RRSP deadline for "+y+" taxes","From Investments");}
   if(lg&&lg.n&&lg.due)add("legacy",(function(){var d=new Date();d.setDate(d.getDate()+7);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");})(),"Review your Legacy file","Once a year, and after big life changes");
   return ev.sort(function(a,b){return a.d.localeCompare(b.d);});
@@ -426,7 +434,7 @@ function downloadCalendar(){
 }
 function legacyCard(v){
   var box=h("div",{style:"display:flex;flex-direction:column;gap:10px"});
-  box.append(h("p",{class:"sub",text:v.reviewed?"Last reviewed "+fromIso(v.reviewed).toLocaleDateString("en-CA",{month:"long",day:"numeric",year:"numeric"}):"Not reviewed yet"}),
+  box.append(h("p",{class:"sub",text:v.reviewed?"Last reviewed "+fromIso(v.reviewed).toLocaleDateString(LOC(),{month:"long",day:"numeric",year:"numeric"}):"Not reviewed yet"}),
     ln("Entries",String(v.n||0)));
   if(legacyReqs.length)box.append(h("p",{class:"small neg",style:"font-weight:600",text:legacyReqs.length===1?"Someone asked to open it.":legacyReqs.length+" people asked to open it."}));
   return box;
@@ -434,10 +442,10 @@ function legacyCard(v){
 /* Amounts stay blurred until tapped, so the total isn't on screen whenever the dashboard is open. */
 function investCard(v){
   var box=h("div",{style:"display:flex;flex-direction:column;gap:10px"}),hid=h("div",{class:"hide",role:"button",tabindex:"0","aria-label":"Show amounts"});
-  hid.append(h("p",{class:"sub",text:"Total value"}),h("p",{class:"big",text:money(v.value,"CAD")}),
-    h("p",{class:"small "+(v.gain>=0?"pos":"neg"),text:(v.gain>=0?"+":"−")+money(Math.abs(v.gain),"CAD")+" vs what you paid"}));
-  if(v.week!=null)hid.append(ln("Past week",(v.week>=0?"+":"−")+money(Math.abs(v.week),"CAD"),v.week>=0?"pos":"neg"));
-  Object.keys(v.room||{}).forEach(function(k){hid.append(ln(k.toUpperCase()+" room left",money(v.room[k],"CAD"),v.room[k]<0?"neg":""));});
+  hid.append(h("p",{class:"sub",text:"Total value"}),h("p",{class:"big",text:money(v.value,v.cur||"CAD")}),
+    h("p",{class:"small "+(v.gain>=0?"pos":"neg"),text:(v.gain>=0?"+":"−")+money(Math.abs(v.gain),v.cur||"CAD")+" vs what you paid"}));
+  if(v.week!=null)hid.append(ln("Past week",(v.week>=0?"+":"−")+money(Math.abs(v.week),v.cur||"CAD"),v.week>=0?"pos":"neg"));
+  Object.keys(v.room||{}).forEach(function(k){hid.append(ln((ROOMNAME[k]||k.toUpperCase())+" room left",money(v.room[k],v.cur||"CAD"),v.room[k]<0?"neg":""));});
   function flip(){hid.classList.toggle("shown");hid.setAttribute("aria-label",hid.classList.contains("shown")?"Hide amounts":"Show amounts");}
   hid.addEventListener("click",flip);hid.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();flip();}});
   box.append(hid,h("p",{class:"small muted",text:"Tap to show or hide amounts."}));
@@ -481,6 +489,9 @@ function drawSettings(app){
   var reset=armed(h("button",{type:"button",class:"btn danger",text:"Forgot the passcode? Start the dashboard over"}),"Tap again: makes new keys and clears the summaries",async function(){
     await startOver();toast("Dashboard reset. Open each app once to fill it again.");
   });
+  if(PC){var sel=h("select",{"aria-label":"Country",style:"max-width:280px;min-height:44px"});PC.LIST.forEach(function(c){var o=h("option",{value:c[0],text:PC.INFO[c[0]].flag+" "+c[1]});if(c[0]===PC.get())o.selected=true;sel.append(o);});
+    sel.addEventListener("change",function(){PC.set(sel.value);});
+    app.append(h("div",{class:"panel"},h("h3",{text:"Country"}),h("p",{class:"small muted",text:"Canada, the US or India. Sets money format and the country-specific parts of every Pixora app: account types and tax deadlines in Investments, renewals in Dates, first steps in Legacy."}),sel));}
   if(!isInstalled())app.append(h("div",{class:"panel"},h("h3",{text:"Home screen"}),h("ol",{class:"steps"},installSteps().map(function(t){return h("li",{text:t});}))));
   app.append(h("div",{class:"panel"},h("h3",{text:"Ideas or problems?"}),h("p",{class:"small muted",text:"Tell Sachin what would make Pixora better or what went wrong, in any app. Nothing from your data is sent."}),
     h("div",{class:"btnrow"},h("button",{type:"button",class:"btn",text:"Send feedback",onclick:function(){if(window.PixoraFeedback)PixoraFeedback.open("dashboard","Pixora");}}))));
@@ -629,3 +640,7 @@ document.addEventListener("visibilitychange",function(){
   });
   if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(function(){});
 })();
+
+/* A new country chosen here or in any app open in another tab: redraw. */
+addEventListener("pixora-country",function(){try{render();toast("Set for "+PC.info().name+".");}catch(e){}});
+addEventListener("storage",function(e){if(e.key==="pixora-country")try{render();}catch(x){}});

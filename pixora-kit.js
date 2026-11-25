@@ -54,7 +54,19 @@ async function enterPass(pass,mk){
 }
 
 /* ---- state ---- */
-function clean(s){try{return K.cfg.clean(s&&typeof s==="object"?s:{});}catch(e){return K.cfg.clean({});}}
+function clean(s){
+  s=s&&typeof s==="object"?s:{};var out;try{out=K.cfg.clean(s);}catch(e){out=K.cfg.clean({});}
+  /* The Pixora country travels inside each app's encrypted data, whatever the app's own clean() keeps. */
+  var PC=root.PixoraCountry;if(PC&&PC.ok(s.country)){out.country=s.country;out.countryAt=+s.countryAt||0;}
+  return out;
+}
+/* Agree on one country: whichever was chosen most recently, on this phone or in synced data. */
+function syncCountry(s){
+  var PC=root.PixoraCountry;if(!PC||!s)return false;
+  if(PC.ok(s.country)&&(s.countryAt||0)>PC.stamp()){PC.set(s.country,s.countryAt,true);return false;}
+  if(PC.chosen()&&(s.country!==PC.get()||(s.countryAt||0)<PC.stamp())){s.country=PC.get();s.countryAt=PC.stamp();return true;}
+  return false;
+}
 async function loadLocal(){var s=await get("state:"+who()).catch(function(){return null;});return s?clean(s):null;}
 /* Save: on the phone right away, to the cloud a moment later. */
 function save(s){
@@ -78,7 +90,7 @@ function listen(){
   K.unsub=stateDoc().onSnapshot(async function(snap){
     if(snap.metadata.hasPendingWrites||!snap.exists)return;
     var d=snap.data();if(!d.ct||(d.ts||0)<=(K.state.ts||0))return;
-    try{var s=clean(await open(K.key,d));s.ts=d.ts;K.state=s;put("state:"+who(),s).catch(function(){});setStatus("synced");K.cfg.onRemote(s);summary();}catch(e){}
+    try{var s=clean(await open(K.key,d));s.ts=d.ts;K.state=s;syncCountry(s);put("state:"+who(),s).catch(function(){});setStatus("synced");K.cfg.onRemote(s);summary();}catch(e){}
   },function(){setStatus("offline");});
 }
 async function openApp(){
@@ -92,7 +104,7 @@ async function openApp(){
     }catch(e){setStatus("offline");}
   }
   var s=cloud&&(!local||(cloud.ts||0)>(local.ts||0))?cloud:local||clean({});
-  K.state=s;put("state:"+who(),s).catch(function(){});
+  K.state=s;if(syncCountry(s))s.ts=Date.now();put("state:"+who(),s).catch(function(){});
   if(!K.local&&(unreadable||!cloud||(local&&(local.ts||0)>(cloud.ts||0))))if(s.ts)push();
   if(!K.local)listen();
   hideGate();K.cfg.onOpen(s,{unreadable:unreadable});summary();T("open_app");
@@ -202,6 +214,11 @@ async function signOut(){
 /* Start the app. cfg: {app, title, blurb, version, clean(s), onOpen(state), onRemote(state), summary(state)?, onStatus(text)?, onGate(shown)?} */
 async function boot(cfg){
   K.cfg=cfg;
+  /* Picking a country in any app's Settings: keep it in this app's data and redraw. */
+  addEventListener("pixora-country",function(e){
+    if(!K.state)return;K.state.country=e.detail.c;K.state.countryAt=e.detail.at;save(K.state);T("country_"+e.detail.c);
+    try{(K.cfg.onCountry||K.cfg.onRemote)(K.state);}catch(x){}
+  });
   if(!root.isSecureContext||!root.crypto||!crypto.subtle||!root.indexedDB){gate("<h1>Can't open here</h1><p>Open the app from its https address in a current browser.</p>");return;}
   if(!root.firebase||!root.PIXORA_CLOUD){K.local=true;return openApp();}
   firebase.initializeApp(root.PIXORA_CLOUD);
